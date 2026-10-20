@@ -498,8 +498,8 @@ func (r *RT) registerBuiltins() {
 	// exact decimal, so the result is correctly rounded.
 	r.define("parse_float", p1, r1, func(f *Func) {
 		s := f.Param(0)
-		i, n, c, neg, eneg, ev, dot, seen := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32),
-			f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
+		i, n, c, neg, eneg, ev, dot, seen, sig := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32),
+			f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
 		v := f.Local(F64)
 		d := r.decV(0)
 		brk, cont := NewLabel(), NewLabel()
@@ -526,6 +526,9 @@ func (r *RT) registerBuiltins() {
 						// leading zeros only move the decimal point
 						dsetDp(d, sub(ddp(d), c32(1))),
 					}, []Expr{
+						// sig counts all significant digits, including those
+						// dropped beyond decCap, for the decimal point.
+						Set(sig, add(get(sig), c32(1))),
 						IfElse(lt(dnd(d), c32(decCap)), []Expr{
 							dset(d, dnd(d), sub(get(c), c32('0'))),
 							dsetNd(d, add(dnd(d), c32(1))),
@@ -536,14 +539,14 @@ func (r *RT) registerBuiltins() {
 				}, []Expr{
 					IfElse(and(eq(get(c), c32('.')), eqz(get(dot))), []Expr{
 						Set(dot, c32(1)),
-						dsetDp(d, dnd(d)),
+						dsetDp(d, get(sig)),
 					}, []Expr{Br(brk)}),
 				}),
 				Set(i, add(get(i), c32(1))),
 				Br(cont),
 			)),
 			If(eqz(get(seen)), Return(c32(0))),
-			If(eqz(get(dot)), dsetDp(d, dnd(d))),
+			If(eqz(get(dot)), dsetDp(d, get(sig))),
 			If(lt(get(i), get(n)), Seq{
 				If(ne(I32Or(at(), c32(0x20)), c32('e')), Return(c32(0))),
 				Set(i, add(get(i), c32(1))),

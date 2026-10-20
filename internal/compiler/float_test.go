@@ -47,7 +47,7 @@ func TestFloatConversion(t *testing.T) {
 		mid.Quo(mid, big.NewFloat(2))
 		strs = append(strs, mid.Text('e', 800))
 	}
-	strs = append(strs, "0.12345678901234567", "1e-400", "-0.0", "000123.4500e-2", ".5", "5.", "1"+strings.Repeat("0", 900)+"e-900")
+	strs = append(strs, "0.12345678901234567", "1e-400", "-0.0", "000123.4500e-2", ".5", "5.")
 
 	var src strings.Builder
 	src.WriteString("for x in [" + strings.Join(lits, ", ") + "]:\n    print(x, -x)\n")
@@ -74,5 +74,38 @@ func TestFloatConversion(t *testing.T) {
 	}
 	if bad > 0 {
 		t.Errorf("%d of %d lines differ", bad, len(wl))
+	}
+}
+
+// TestFloatParseLong checks inputs with more digits than the exact
+// decimal keeps. They are compared with fixed values because some Go
+// releases, used by the reference, misparse them.
+func TestFloatParseLong(t *testing.T) {
+	z := strings.Repeat("0", 900)
+	cases := map[string]string{
+		"1" + z[:800] + "e-800":  "1.0", // one digit beyond the kept 800
+		"1" + z + "e-900":        "1.0",
+		"1" + z + ".5e-900":      "1.0",
+		"00" + "1" + z + "e-899": "10.0",
+		"0." + "000" + "1" + z:   "0.0001",
+		// 1 + 2^-53, halfway to the next float: rounds to even, unless a
+		// nonzero digit beyond the kept digits makes it larger.
+		"1.00000000000000011102230246251565404236316680908203125":                 "1.0",
+		"1.00000000000000011102230246251565404236316680908203125" + z[:850] + "1": "1.0000000000000002",
+		"1" + z[:850] + "1e-851":                 "1.0",
+		"9" + strings.Repeat("9", 900) + "e-901": "1.0",
+	}
+	var src strings.Builder
+	var want []string
+	for in, out := range cases {
+		src.WriteString("print(float(\"" + in + "\"))\n")
+		want = append(want, out)
+	}
+	got, stderr, err := execute(t, newTestRuntime(t), "long", src.String())
+	if err != nil {
+		t.Fatalf("%v: %s", err, stderr)
+	}
+	if w := strings.Join(want, "\n") + "\n"; got != w {
+		t.Errorf("got\n%swant\n%s", got, w)
 	}
 }
