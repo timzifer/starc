@@ -372,42 +372,17 @@ func (r *RT) registerStr() {
 }
 
 // defineFloatToStr defines f64_to_str, Starlark's %g-style shortest
-// formatting of floats. Digits are found by trying increasing precision
-// until the value round-trips through float64 arithmetic.
+// formatting of floats (like Go's strconv.FormatFloat(x, 'g', -1, 64)).
+// The shortest digits that round-trip are found with exact decimal
+// arithmetic (see decimal.go).
 func (r *RT) defineFloatToStr() {
-	// scale(v, j) = v * 10^j
-	r.define("f64_scale", []ValType{F64, I32}, rf, func(f *Func) {
-		v, j := f.Param(0), f.Param(1)
-		p, i := f.Local(F64), f.Local(I32)
-		brk, cont := NewLabel(), NewLabel()
-		f.Add(
-			Block(brk, Loop(cont,
-				BrIf(brk, le(get(j), c32(22))),
-				Set(v, F64Mul(get(v), F64c(1e22))),
-				Set(j, sub(get(j), c32(22))),
-				Br(cont),
-			)),
-			Block(brk, Loop(cont,
-				BrIf(brk, ge(get(j), c32(-22))),
-				Set(v, F64Div(get(v), F64c(1e22))),
-				Set(j, add(get(j), c32(22))),
-				Br(cont),
-			)),
-			Set(p, F64c(1)),
-			forRange(i, c32(0), Select(get(j), sub(c32(0), get(j)), ge(get(j), c32(0))),
-				Set(p, F64Mul(get(p), F64c(10)))),
-			IfV(F64, ge(get(j), c32(0)), F64Mul(get(v), get(p)), F64Div(get(v), get(p))),
-		)
-	})
 	r.define("f64_to_str", pf, r1, func(f *Func) {
 		x := f.Param(0)
-		ax, y := f.Local(F64), f.Local(F64)
-		e, p, k, nd, dp, i, buf, q, neg, exp, digits, ds := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32),
-			f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
-		nn := f.Local(I64)
-		brk, cont := NewLabel(), NewLabel()
+		ax := f.Local(F64)
+		nd, dp, i, buf, q, neg, exp, digits, ds := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32),
+			f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
 		put := func(c Expr) Expr { return Seq{I32Store8(get(q), 0, c), Set(q, add(get(q), c32(1)))} }
-		digit := func(i Expr) Expr { return I32Load8U(add(get(ds), i), 0) }
+		digit := func(i Expr) Expr { return add(I32Load8U(add(get(ds), i), 0), c32('0')) }
 		f.Add(
 			If(F64Ne(Get(x), Get(x)), Return(r.S("nan"))),
 			If(F64Eq(Get(x), F64c(posInf)), Return(r.S("+inf"))),
@@ -415,31 +390,11 @@ func (r *RT) defineFloatToStr() {
 			If(F64Eq(Get(x), F64c(0)), Return(IfV(I32, I64LtS(I64ReinterpF64(Get(x)), I64c(0)), r.S("-0.0"), r.S("0.0")))),
 			Set(neg, F64Lt(Get(x), F64c(0))),
 			Set(ax, F64Abs(Get(x))),
-			// estimate decimal exponent
-			Set(y, get(ax)),
-			Block(brk, Loop(cont, BrIf(brk, F64Lt(get(y), F64c(10))), Set(y, F64Div(get(y), F64c(10))), Set(e, add(get(e), c32(1))), Br(cont))),
-			Block(brk, Loop(cont, BrIf(brk, F64Ge(get(y), F64c(1))), Set(y, F64Mul(get(y), F64c(10))), Set(e, sub(get(e), c32(1))), Br(cont))),
-			// find the shortest precision that round-trips
-			Set(p, c32(1)),
-			Block(brk, Loop(cont,
-				Set(k, add(sub(get(e), get(p)), c32(1))),
-				Set(nn, I64TruncSatF64S(F64Nearest(r.Call("f64_scale", get(ax), sub(c32(0), get(k)))))),
-				BrIf(brk, F64Eq(r.Call("f64_scale", F64ConvI64S(get(nn)), get(k)), get(ax))),
-				BrIf(brk, ge(get(p), c32(17))),
-				Set(p, add(get(p), c32(1))),
-				Br(cont),
-			)),
-			// strip trailing zeros
-			Block(brk, Loop(cont,
-				BrIf(brk, or(I64Eqz(get(nn)), I64Ne(I64RemU(get(nn), I64c(10)), I64c(0)))),
-				Set(nn, I64DivU(get(nn), I64c(10))),
-				Set(k, add(get(k), c32(1))),
-				Br(cont),
-			)),
-			Set(digits, r.Call("i64_to_str", get(nn))),
-			Set(ds, sbytes(get(digits))),
-			Set(nd, slen(get(digits))),
-			Set(dp, add(get(nd), get(k))),
+			// shortest digits that round-trip, computed exactly
+			r.Call("dec_shortest", get(ax)),
+			Set(ds, add(r.decV(0), c32(decDigits))),
+			Set(nd, dnd(r.decV(0))),
+			Set(dp, ddp(r.decV(0))),
 			Set(exp, sub(get(dp), c32(1))),
 			Set(buf, r.Call("alloc", c32(400))),
 			Set(q, get(buf)),

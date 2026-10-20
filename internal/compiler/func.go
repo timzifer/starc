@@ -551,14 +551,18 @@ func (fc *fcomp) call(e *syntax.CallExpr) Expr {
 		star = append(star, nil)
 	}
 
-	// The callee (and method receiver) are evaluated first.
+	// The callee is evaluated first. For a method call, that is the
+	// receiver and the method lookup, which fails before any argument is
+	// evaluated if there is no such method.
 	var code Seq
 	fnT := fc.tmp()
-	var recv syntax.Expr
-	methodID := -1
+	var recv Expr
 	if dot, ok := e.Fn.(*syntax.DotExpr); ok {
-		recv = dot.X
-		methodID = r.MethodID(dot.Name.Name)
+		rv := fc.tmp()
+		code = append(code,
+			Set(rv, fc.expr(dot.X)),
+			Set(fnT, r.Call("method_resolve", Get(rv), I32c(int32(r.MethodID(dot.Name.Name))))))
+		recv = Get(rv)
 	} else {
 		code = append(code, Set(fnT, fc.expr(e.Fn)))
 	}
@@ -572,7 +576,7 @@ func (fc *fcomp) call(e *syntax.CallExpr) Expr {
 	if !hasStar {
 		code = append(code, Set(args, r.Call("tuple_new", I32c(int32(len(pos)+offset)))))
 		if recv != nil {
-			code = append(code, r.TupleSet(Get(args), 0, fc.expr(recv)))
+			code = append(code, r.TupleSet(Get(args), 0, recv))
 		}
 		for i, x := range pos {
 			code = append(code, r.TupleSet(Get(args), i+offset, fc.expr(x)))
@@ -581,7 +585,7 @@ func (fc *fcomp) call(e *syntax.CallExpr) Expr {
 		l := fc.tmp()
 		code = append(code, Set(l, r.Call("list_new", I32c(int32(len(pos)+offset)))))
 		if recv != nil {
-			code = append(code, r.Call("list_append_raw", Get(l), fc.expr(recv)))
+			code = append(code, r.Call("list_append_raw", Get(l), recv))
 		}
 		for i, x := range pos {
 			if star[i] != nil {
@@ -606,9 +610,7 @@ func (fc *fcomp) call(e *syntax.CallExpr) Expr {
 		}
 		kw = Get(d)
 	}
-	if methodID >= 0 {
-		return append(code, r.Call("call_method", I32c(int32(methodID)), Get(args), kw))
-	}
+	// For a method call, args[0] is the receiver.
 	return append(code, r.Call("call", Get(fnT), Get(args), kw))
 }
 

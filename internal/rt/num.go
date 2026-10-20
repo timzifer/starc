@@ -27,6 +27,9 @@ var BinOps = map[string]string{
 	OpMod: "mod", OpAnd: "bitand", OpOr: "bitor", OpXor: "bitxor", OpShl: "shl", OpShr: "shr",
 }
 
+// compareLimit is Starlark's depth limit on recursive comparisons.
+const compareLimit = 10
+
 // Small ints in [-intCacheMin, intCacheSize-intCacheMin) are preallocated.
 const (
 	intCacheMin  = 16
@@ -328,17 +331,32 @@ func (r *RT) registerNum() {
 				Set(la, ld(get(a), 4)), Set(lb, ld(get(b), 4)),
 				Set(pa, r.Call("seq_base", get(a))), Set(pb, r.Call("seq_base", get(b))),
 				Set(n, Select(get(la), get(lb), lt(get(la), get(lb)))),
+				If(get(n), r.Call("cmp_enter")),
 				forRangeL(i, c32(0), get(n), brk,
 					If(not(r.Call("eq", ld(elem(get(pa), 0, get(i)), 0), ld(elem(get(pb), 0, get(i)), 0))), Seq{
 						Set(c, r.Call("cmp", ld(elem(get(pa), 0, get(i)), 0), ld(elem(get(pb), 0, get(i)), 0), get(opn))),
+						r.Call("cmp_leave"),
 						Return(get(c)),
 					}),
 				),
+				If(get(n), r.Call("cmp_leave")),
 				Return(cmp3(lt(get(la), get(lb)), gt(get(la), get(lb)))),
 			}),
 			r.Call("cmp_error", get(a), get(b), get(opn)),
 			Unreachable(),
 		)
+	})
+	// cmp_enter/cmp_leave bracket the comparison of container elements.
+	// Like Starlark, comparisons nested compareLimit deep fail; this also
+	// bounds the recursion on cyclic values. fail resets the depth.
+	r.define("cmp_enter", p0, r0, func(f *Func) {
+		f.Add(
+			GSet(r.CmpDepth, add(GGet(r.CmpDepth), c32(1))),
+			If(ge(GGet(r.CmpDepth), c32(compareLimit)), r.Fail("comparison exceeded maximum recursion depth")),
+		)
+	})
+	r.define("cmp_leave", p0, r0, func(f *Func) {
+		f.Add(GSet(r.CmpDepth, sub(GGet(r.CmpDepth), c32(1))))
 	})
 	r.define("cmp_error", p3, r0, func(f *Func) {
 		f.Add(r.Fail(r.TypeName(get(f.Param(0))), " ", get(f.Param(2)), " ", r.TypeName(get(f.Param(1))),
@@ -350,42 +368,60 @@ func (r *RT) registerNum() {
 		a, b := f.Param(0), f.Param(1)
 		ta, tb, i, n, ent, v := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
 		pa, pb := f.Local(I32), f.Local(I32)
+		la64 := f.Local(I64)
 		f.Add(
 			Set(ta, tagOf(get(a))), Set(tb, tagOf(get(b))),
 			If(and(eq(get(ta), c32(TInt)), eq(get(tb), c32(TInt))),
 				Return(I64Eq(i64v(get(a)), i64v(get(b))))),
 			If(and(r.Call("is_num", get(a)), r.Call("is_num", get(b))),
 				Return(eqz(r.Call("cmp", get(a), get(b), r.S("=="))))),
-			If(eq(get(a), get(b)), Return(c32(1))),
 			If(ne(get(ta), get(tb)), Return(c32(0))),
+			// Containers are compared element-wise even if identical, so that
+			// cyclic values hit the depth limit as in Starlark.
+			If(and(eq(get(a), get(b)), not(or(or(eq(get(ta), c32(TList)), eq(get(ta), c32(TTuple))), eq(get(ta), c32(TDict))))),
+				Return(c32(1))),
 			If(eq(get(ta), c32(TString)), Return(r.Call("str_eq", get(a), get(b)))),
 			If(eq(get(ta), c32(TBool)), Return(eq(ld(get(a), offBool), ld(get(b), offBool)))),
 			If(or(eq(get(ta), c32(TTuple)), eq(get(ta), c32(TList))), Seq{
 				Set(n, ld(get(a), 4)),
 				If(ne(get(n), ld(get(b), 4)), Return(c32(0))),
+				If(eqz(get(n)), Return(c32(1))),
 				Set(pa, r.Call("seq_base", get(a))), Set(pb, r.Call("seq_base", get(b))),
+				r.Call("cmp_enter"),
 				forRange(i, c32(0), get(n),
 					If(not(r.Call("eq", ld(elem(get(pa), 0, get(i)), 0), ld(elem(get(pb), 0, get(i)), 0))),
-						Return(c32(0)))),
+						Seq{r.Call("cmp_leave"), Return(c32(0))})),
+				r.Call("cmp_leave"),
 				Return(c32(1)),
 			}),
 			If(eq(get(ta), c32(TDict)), Seq{
 				If(ne(ld(get(a), offDictLen), ld(get(b), offDictLen)), Return(c32(0))),
+				If(eqz(ld(get(a), offDictLen)), Return(c32(1))),
 				forRange(i, c32(0), ld(get(a), offDictUsed),
 					Set(ent, add(ld(get(a), offDictEntries), mul(get(i), c32(12)))),
 					If(ld(get(ent), 4), Seq{
+						// Key lookup is a fresh comparison, as in Starlark.
+						Set(n, GGet(r.CmpDepth)),
+						GSet(r.CmpDepth, c32(0)),
 						Set(v, r.Call("dict_get", get(b), ld(get(ent), 4))),
+						GSet(r.CmpDepth, get(n)),
 						If(eqz(get(v)), Return(c32(0))),
-						If(not(r.Call("eq", get(v), ld(get(ent), 8))), Return(c32(0))),
+						r.Call("cmp_enter"),
+						Set(v, r.Call("eq", get(v), ld(get(ent), 8))),
+						r.Call("cmp_leave"),
+						If(eqz(get(v)), Return(c32(0))),
 					}),
 				),
 				Return(c32(1)),
 			}),
-			If(eq(get(ta), c32(TRange)),
-				Return(r.Call("eq", r.Call("list_from", get(a)), r.Call("list_from", get(b))))),
-			If(eq(get(ta), c32(TBound)),
-				Return(and(eq(ld(get(a), offBoundFn), ld(get(b), offBoundFn)),
-					eq(ld(get(a), offBoundRecv), ld(get(b), offBoundRecv))))),
+			// Ranges are equal if they denote the same sequence.
+			If(eq(get(ta), c32(TRange)), Seq{
+				Set(la64, r.Call("range_len", get(a))),
+				If(I64Ne(get(la64), r.Call("range_len", get(b))), Return(c32(0))),
+				If(I64Eqz(get(la64)), Return(c32(1))),
+				If(I64Ne(I64Load(get(a), offRangeStart), I64Load(get(b), offRangeStart)), Return(c32(0))),
+				Return(or(I64Eq(get(la64), I64c(1)), I64Eq(I64Load(get(a), offRangeStep), I64Load(get(b), offRangeStep)))),
+			}),
 			c32(0),
 		)
 	})
@@ -419,7 +455,7 @@ func (r *RT) registerNum() {
 					Set(h, add(mul(I32Xor(get(h), r.Call("hash", ld(elem(get(v), offTupElems, get(i)), 0))), c32(1000003)), get(i)))),
 				Return(get(h)),
 			}),
-			If(or(eq(get(t), c32(TList)), eq(get(t), c32(TDict))),
+			If(or(or(eq(get(t), c32(TList)), eq(get(t), c32(TDict))), eq(get(t), c32(TRange))),
 				r.Fail("unhashable type: ", r.TypeName(get(v)))),
 			mul(get(v), c32(-1640531535)),
 		)

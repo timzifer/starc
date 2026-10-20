@@ -152,15 +152,15 @@ func (r *RT) registerCall() {
 			return body
 		}))
 	})
-	// call_method(id, args, kwargs): args[0] is the receiver
-	r.define("call_method", p3, r1, func(f *Func) {
-		id, args, kw := f.Param(0), f.Param(1), f.Param(2)
-		m, recv := f.Local(I32), f.Local(I32)
+	// method_resolve(recv, id) -> the method's callable; it is called
+	// with the receiver as the first argument.
+	r.define("method_resolve", p2, r1, func(f *Func) {
+		recv, id := f.Param(0), f.Param(1)
+		m := f.Local(I32)
 		f.Add(
-			Set(recv, ld(get(args), offTupElems)),
 			Set(m, r.Call("method_lookup", get(recv), get(id))),
 			If(eqz(get(m)), r.Fail(r.TypeName(get(recv)), " has no .", r.Call("method_name", get(id)), " field or method")),
-			r.Call("call", get(m), get(args), get(kw)),
+			get(m),
 		)
 	})
 	// attr(x, id) -> bound method

@@ -65,3 +65,33 @@ b = [1, (a, 2)]
 print(a, d, b, [a, a], str(a))
 a.append(3)
 print(a, repr(a))
+---
+# Floats are parsed and formatted with correct rounding.
+print(float("0.12345678901234567") == 0.12345678901234567, 0.09999999999999995, float("0.09999999999999995"))
+print(1.4593585424475087e-142, float("1.4593585424475087e-142"), 5e-324, float("4.9406564584124654e-324"))
+print(float("2.2250738585072011e-308"), float("1.7976931348623157e308"), float("-0.0"), float("1e-400"))
+print(float("0.1e1"), float("123456789012345678901234567890"), 1e21, 1e-5, 123456.0, 1234567.0, 0.0001)
+---
+# int() binds x and base like any function.
+print(int(x = "12"), int(x = "ff", base = 16), int("10", base = 2), int(-9223372036854775808.0), int(-2.5))
+---
+# Ranges keep 64-bit lengths; slicing and indexing stay lazy.
+r = range(4294967296)
+print(len(r), list(r[:2]), r[-1], r[4294967293], r[4294967290:], len(r[::2]), bool(r))
+print(range(0, 10, 3) == range(0, 12, 3), range(1, 1) == range(5, 2), r == range(4294967296), range(3) == range(1, 3))
+print(len(range(-4294967296, 4294967296, 3)), 4294967295 in r, 4294967296 in r)
+---
+# Bound methods compare (and hash) by identity, as in Starlark.
+x = [1]
+m = x.append
+d = {m: "m"}
+print(d[m], m == m, x.append == x.append, x.append in d)
+---
+# Comparisons nested 9 deep are fine.
+a = [1]
+b = [1]
+for i in range(8):
+    a = [a]
+    b = (b,)
+    b = [b[0]]
+print(a == b, a < [[2]], {"k": a} == {"k": b})

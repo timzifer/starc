@@ -1,6 +1,8 @@
 package rt
 
 import (
+	"math"
+
 	. "github.com/timzifer/starc/internal/wasm"
 )
 
@@ -391,6 +393,17 @@ func (r *RT) registerColl() {
 		)
 	})
 
+	// range_len32(r) -> length of a range that is iterated or
+	// materialized; such ranges are limited to int32 lengths.
+	r.define("range_len32", p1, r1, func(f *Func) {
+		n := f.Local(I64)
+		f.Add(
+			Set(n, r.Call("range_len", get(f.Param(0)))),
+			If(I64GtU(get(n), I64c(math.MaxInt32)), r.Fail("range too large to iterate (",
+				r.Call("i64_to_str", get(n)), " elements)")),
+			I32WrapI64(get(n)),
+		)
+	})
 	// span_count(a, b, step) -> number of values a, a+step, ... before b.
 	// The distance is computed in unsigned arithmetic, so it cannot
 	// overflow however far apart a and b are.
@@ -412,7 +425,7 @@ func (r *RT) registerColl() {
 			Set(t, tagOf(get(v))),
 			If(or(or(eq(get(t), c32(TString)), eq(get(t), c32(TTuple))), or(eq(get(t), c32(TList)), eq(get(t), c32(TDict)))),
 				Return(ld(get(v), 4))),
-			If(eq(get(t), c32(TRange)), Return(I32WrapI64(r.Call("range_len", get(v))))),
+			If(eq(get(t), c32(TRange)), Return(r.Call("range_len32", get(v)))),
 			r.Fail("len: value of type ", r.TypeName(get(v)), " has no len"),
 		)
 	})
@@ -443,7 +456,7 @@ func (r *RT) registerColl() {
 	})
 	r.define("seq_len", p1, r1, func(f *Func) {
 		s := f.Param(0)
-		f.Add(IfV(I32, isTag(get(s), TRange), I32WrapI64(r.Call("range_len", get(s))), ld(get(s), 4)))
+		f.Add(IfV(I32, isTag(get(s), TRange), r.Call("range_len32", get(s)), ld(get(s), 4)))
 	})
 	r.define("seq_at", p2, r1, func(f *Func) {
 		s, i := f.Param(0), f.Param(1)
@@ -486,6 +499,7 @@ func (r *RT) registerColl() {
 	r.define("index", p2, r1, func(f *Func) {
 		x, y := f.Param(0), f.Param(1)
 		t, i, v := f.Local(I32), f.Local(I32), f.Local(I32)
+		j, n := f.Local(I64), f.Local(I64)
 		f.Add(
 			Set(t, tagOf(get(x))),
 			If(eq(get(t), c32(TDict)), Seq{
@@ -493,7 +507,16 @@ func (r *RT) registerColl() {
 				If(eqz(get(v)), r.Fail("key ", r.Call("repr", get(y)), " not in dict")),
 				Return(get(v)),
 			}),
-			If(or(or(eq(get(t), c32(TList)), eq(get(t), c32(TTuple))), or(eq(get(t), c32(TString)), eq(get(t), c32(TRange)))), Seq{
+			If(eq(get(t), c32(TRange)), Seq{
+				If(not(isTag(get(y), TInt)), r.Fail("range index: got ", r.TypeName(get(y)), ", want int")),
+				Set(j, i64v(get(y))),
+				Set(n, r.Call("range_len", get(x))),
+				If(I64LtS(get(j), I64c(0)), Set(j, I64Add(get(j), get(n)))),
+				If(or(I64LtS(get(j), I64c(0)), I64GeS(get(j), get(n))),
+					r.Fail("index ", r.Call("i64_to_str", i64v(get(y))), " out of range [0:", r.Call("i64_to_str", get(n)), "]")),
+				Return(r.Call("int", I64Add(I64Load(get(x), offRangeStart), I64Mul(get(j), I64Load(get(x), offRangeStep))))),
+			}),
+			If(or(or(eq(get(t), c32(TList)), eq(get(t), c32(TTuple))), eq(get(t), c32(TString))), Seq{
 				If(not(isTag(get(y), TInt)), r.Fail(r.TypeName(get(x)), " index: got ", r.TypeName(get(y)), ", want int")),
 				Set(i, r.Call("norm_index", i64v(get(y)), r.Call("len", get(x)))),
 				If(eq(get(t), c32(TString)), Return(r.Call("str_from", add(sbytes(get(x)), get(i)), c32(1)))),
@@ -520,8 +543,8 @@ func (r *RT) registerColl() {
 	// slice(x, lo, hi, step) with 0 for absent operands
 	r.define("slice", p4, r1, func(f *Func) {
 		x, lov, hiv, stv := f.Param(0), f.Param(1), f.Param(2), f.Param(3)
-		n, t, k, res, base, cnt := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
-		lo, hi, step, i, rs := f.Local(I64), f.Local(I64), f.Local(I64), f.Local(I64), f.Local(I64)
+		t, k, res, base, cnt := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
+		n, lo, hi, step, i, rs := f.Local(I64), f.Local(I64), f.Local(I64), f.Local(I64), f.Local(I64), f.Local(I64)
 		absent := func(v Local) Expr { return or(eqz(get(v)), isTag(get(v), TNone)) }
 		// Like Starlark, slice indices and the step must fit in int32.
 		bound := func(v Local) Expr { return I64ExtendI32S(r.Call("as_i32", get(v), r.S("slice index"))) }
@@ -529,14 +552,15 @@ func (r *RT) registerColl() {
 			Set(t, tagOf(get(x))),
 			If(not(or(or(eq(get(t), c32(TString)), eq(get(t), c32(TRange))), or(eq(get(t), c32(TList)), eq(get(t), c32(TTuple))))),
 				r.Fail("invalid slice operand ", r.TypeName(get(x)))),
-			Set(n, r.Call("seq_len", get(x))),
+			// Range lengths may exceed int32; the selection is computed lazily.
+			Set(n, IfV(I64, eq(get(t), c32(TRange)), r.Call("range_len", get(x)), I64ExtendI32S(ld(get(x), 4)))),
 			Set(step, IfV(I64, absent(stv), I64c(1), I64ExtendI32S(r.Call("as_i32", get(stv), r.S("slice step"))))),
 			If(I64Eqz(get(step)), r.Fail("zero is not a valid slice step")),
 			IfElse(I64GtS(get(step), I64c(0)), []Expr{
 				Set(lo, IfV(I64, absent(lov), I64c(0), r.Call("clamp", bound(lov), get(n), c32(0)))),
-				Set(hi, IfV(I64, absent(hiv), I64ExtendI32S(get(n)), r.Call("clamp", bound(hiv), get(n), c32(0)))),
+				Set(hi, IfV(I64, absent(hiv), get(n), r.Call("clamp", bound(hiv), get(n), c32(0)))),
 			}, []Expr{
-				Set(lo, IfV(I64, absent(lov), I64ExtendI32S(sub(get(n), c32(1))), r.Call("clamp", bound(lov), get(n), c32(1)))),
+				Set(lo, IfV(I64, absent(lov), I64Sub(get(n), I64c(1)), r.Call("clamp", bound(lov), get(n), c32(1)))),
 				Set(hi, IfV(I64, absent(hiv), I64c(-1), r.Call("clamp", bound(hiv), get(n), c32(1)))),
 			}),
 			// An empty selection starts (and ends) at lo for positive steps
@@ -579,11 +603,9 @@ func (r *RT) registerColl() {
 	})
 	// clamp(i, n, neg) -> slice bound. For positive steps the result is in
 	// [0, n]; for negative steps in [-1, n-1].
-	r.define("clamp", []ValType{I64, I32, I32}, ri, func(f *Func) {
-		i, n, neg := f.Param(0), f.Param(1), f.Param(2)
-		nn := f.Local(I64)
+	r.define("clamp", []ValType{I64, I64, I32}, ri, func(f *Func) {
+		i, nn, neg := f.Param(0), f.Param(1), f.Param(2)
 		f.Add(
-			Set(nn, I64ExtendI32S(get(n))),
 			If(I64LtS(Get(i), I64c(0)), Set(i, I64Add(Get(i), get(nn)))),
 			IfElse(get(neg), []Expr{
 				If(I64LtS(Get(i), I64c(0)), Return(I64c(-1))),
