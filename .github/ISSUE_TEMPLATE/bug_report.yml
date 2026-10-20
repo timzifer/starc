@@ -1,0 +1,48 @@
+name: Bug report
+description: Something does not compile, crashes, or behaves differently from Starlark.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting! Please check docs/language.md for known deviations first.
+  - type: textarea
+    id: program
+    attributes:
+      label: Starlark program
+      description: A minimal program that shows the problem.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How did you compile and run it?
+      description: The starc command line or Go code, and the WebAssembly runtime used.
+      placeholder: starc run prog.star
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: For example, the output of the go.starlark.net interpreter.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: starc version
+      description: Output of `starc version` or the module version you use.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: Go 1.27, linux/amd64, wazero 1.12
