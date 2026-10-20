@@ -156,11 +156,11 @@ type RT struct {
 	scratch uint32 // 16 bytes of static scratch memory
 
 	// Methods maps "type.method" to the global slot holding the callable.
-	methodNames []string
-	methodIDs   map[string]int
-	methodTable uint32 // static table [NumTags][len(methodNames)]i32
+	methodNames   []string
+	methodIDs     map[string]int
+	methodTable   uint32 // static table [NumTags][len(methodNames)]i32
 	methodNameTab uint32 // static table of method name strings
-	methodInit  []Expr
+	methodInit    []Expr
 
 	// Hooks supplied by the compiler: Starlark-level helpers from the prelude.
 	Hooks map[string]func() Expr
@@ -379,9 +379,9 @@ func (r *RT) LayoutMethods() {
 
 // ---- helpers for writing runtime code ----
 
-func tagOf(v Expr) Expr      { return I32Load8U(v, 0) }
-func isTag(v Expr, t int) Expr { return I32Eq(tagOf(v), I32c(int32(t))) }
-func ld(p Expr, off uint32) Expr { return I32Load(p, off) }
+func tagOf(v Expr) Expr                  { return I32Load8U(v, 0) }
+func isTag(v Expr, t int) Expr           { return I32Eq(tagOf(v), I32c(int32(t))) }
+func ld(p Expr, off uint32) Expr         { return I32Load(p, off) }
 func st(p Expr, off uint32, v Expr) Expr { return I32Store(p, off, v) }
 func c32(v int) Expr                     { return I32c(int32(v)) }
 func add(a, b Expr) Expr                 { return I32Add(a, b) }
@@ -399,7 +399,9 @@ func not(a Expr) Expr                    { return I32Eqz(a) }
 func get(l Local) Expr                   { return Get(l) }
 
 // elem yields the address of the i'th 4-byte element after base+off.
-func elem(base Expr, off uint32, i Expr) Expr { return add(add(base, I32Shl(i, c32(2))), c32(int(off))) }
+func elem(base Expr, off uint32, i Expr) Expr {
+	return add(add(base, I32Shl(i, c32(2))), c32(int(off)))
+}
 
 // forRange emits: for i = from; i < to; i++ { body }.
 func forRange(i Local, from, to Expr, body ...Expr) Expr {

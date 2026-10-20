@@ -356,6 +356,16 @@ func (r *RT) registerBuiltins() {
 		)
 	})
 
+	r.builtin("_byte", func(f *Func, args, kw Local) {
+		s := f.Local(I32)
+		f.Add(
+			r.checkArgs("_byte", args, kw, 2, 2),
+			Set(s, arg(args, 0)),
+			r.Call("int", I64ExtendI32U(I32Load8U(add(sbytes(get(s)),
+				r.Call("norm_index", r.Call("as_int", arg(args, 1), r.S("_byte")), slen(get(s)))), 0))),
+		)
+	})
+
 	// ---- list methods ----
 	r.builtin("list.append", func(f *Func, args, kw Local) {
 		f.Add(r.checkArgs("append", args, kw, 2, 2), r.Call("list_append", arg(args, 0), arg(args, 1)), r.NoneV())

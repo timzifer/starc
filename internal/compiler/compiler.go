@@ -77,6 +77,7 @@ type compiler struct {
 	prelude *unit
 	user    *unit
 	specs   []uint32 // specs with recursion guards
+	reach   *reach
 	nfunc   int
 }
 
@@ -148,12 +149,17 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		return nil, c.errs
 	}
 
+	c.reach = c.computeReach()
+
 	// Hooks into the prelude used by the runtime.
 	r.Hooks["percent_format"] = func() Expr { return c.preludeGlobal("_percent_format") }
 
 	// Methods: primitive methods are static builtin objects; prelude
 	// methods are stored after the prelude has been initialized.
 	for _, ms := range r.PrimitiveMethods() {
+		if !c.reach.usesMethod(ms.Name) {
+			continue
+		}
 		r.SetMethod(ms.Tag, ms.Name, U32c(r.BuiltinObj(ms.Builtin)))
 	}
 
@@ -164,6 +170,9 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 	pinit := c.compileToplevel(c.prelude)
 	initBody = append(initBody, Call(pinit))
 	for _, name := range sortedKeys(c.prelude.defs) {
+		if !c.reach.defs[name] {
+			continue
+		}
 		for prefix, tag := range map[string]int{"_str_": rt.TString, "_list_": rt.TList, "_dict_": rt.TDict} {
 			if strings.HasPrefix(name, prefix) {
 				initBody = append(initBody, r.StoreMethod(tag, name[len(prefix):], GGet(c.prelude.byName[name])))

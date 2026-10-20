@@ -264,6 +264,9 @@ func (fc *fcomp) stmt(s syntax.Stmt) Expr {
 		return fc.ret(fc.expr(s.Result))
 
 	case *syntax.DefStmt:
+		if fc.u.prelude && fc.c.reach != nil && !fc.c.reach.defs[s.Name.Name] {
+			return Nop()
+		}
 		return fc.assign(s.Name, fc.function(s.Function.(*resolve.Function), fc))
 
 	case *syntax.LoadStmt:
