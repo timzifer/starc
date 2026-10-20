@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	"github.com/timzifer/starc"
@@ -68,7 +69,22 @@ func versionString() string {
 	if version != "" {
 		return version
 	}
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		if v := moduleVersion(bi.Main.Version); v != "" {
+			return v
+		}
+	}
 	return starc.Version
+}
+
+// moduleVersion turns the main module version recorded by the Go
+// toolchain (for example by "go install ...@v0.1.0") into the form the
+// release build uses. It returns "" when no version was recorded.
+func moduleVersion(v string) string {
+	if v == "" || v == "(devel)" {
+		return ""
+	}
+	return strings.TrimPrefix(v, "v")
 }
 
 type buildOpts struct {

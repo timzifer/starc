@@ -63,3 +63,16 @@ func TestErrors(t *testing.T) {
 		t.Errorf("help: %q", stdout)
 	}
 }
+
+func TestModuleVersion(t *testing.T) {
+	for in, want := range map[string]string{
+		"":        "",
+		"(devel)": "",
+		"v0.1.0":  "0.1.0",
+		"v0.1.1-0.20261020173601-54ed88086fa5+dirty": "0.1.1-0.20261020173601-54ed88086fa5+dirty",
+	} {
+		if got := moduleVersion(in); got != want {
+			t.Errorf("moduleVersion(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
