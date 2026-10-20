@@ -91,3 +91,50 @@ print(int("0x", 0))
 print("x", invalid = True)
 ---
 print("x", sep = "-", end = "")
+---
+print({range(3): "value"})
+---
+print(int())
+---
+print(int(base = 2))
+---
+print(int("10", 10, base = 2))
+---
+print(int("10", ignored = True))
+---
+print(int(float("inf")))
+---
+def side():
+    print("side effect")
+    return 1
+
+print("before")
+[].missing(side())
+---
+a = []
+a.append(a)
+print(a == a)
+---
+a = []
+a.append(a)
+print(a in [a])
+---
+d = {}
+d["k"] = d
+print(d == d)
+---
+a = [1]
+b = [1]
+for i in range(9):
+    a = [a]
+    b = [b]
+print(a == b)
+---
+a = [1]
+b = [1]
+for i in range(9):
+    a = [a]
+    b = [b]
+print(a < b)
+---
+print(float("1e400"))

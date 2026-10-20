@@ -137,7 +137,9 @@ func (r *RT) registerBuiltins() {
 		f.Add(r.checkArgs("_error", args, kw, 1, 1), r.Call("fail", r.Call("str", arg(args, 0))), Unreachable())
 	})
 	r.builtin("len", func(f *Func, args, kw Local) {
-		f.Add(r.checkArgs("len", args, kw, 1, 1), r.Call("int", I64ExtendI32S(r.Call("len", arg(args, 0)))))
+		f.Add(r.checkArgs("len", args, kw, 1, 1),
+			If(isTag(arg(args, 0), TRange), Return(r.Call("int", r.Call("range_len", arg(args, 0))))),
+			r.Call("int", I64ExtendI32S(r.Call("len", arg(args, 0)))))
 	})
 	r.builtin("type", func(f *Func, args, kw Local) {
 		f.Add(r.checkArgs("type", args, kw, 1, 1), r.TypeName(arg(args, 0)))
@@ -153,18 +155,35 @@ func (r *RT) registerBuiltins() {
 			IfV(I32, eqz(nargs(args)), r.FalseV(), r.bool(r.Call("truth", arg(args, 0)))))
 	})
 	r.builtin("int", func(f *Func, args, kw Local) {
-		x, base, hasBase, res := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
+		x, base, hasBase, res, i, e, k := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32),
+			f.Local(I32), f.Local(I32), f.Local(I32)
 		fl := f.Local(F64)
 		f.Add(
-			If(gt(nargs(args), c32(2)), r.Fail("int: got too many arguments")),
-			If(eqz(nargs(args)), Return(addr(r.Int(0)))),
-			Set(x, arg(args, 0)),
+			// Bind the parameters x and base?.
+			If(gt(nargs(args), c32(2)), r.Fail("int: got ", r.Call("i64_to_str", I64ExtendI32S(nargs(args))),
+				" arguments, want at most 2")),
+			If(gt(nargs(args), c32(0)), Set(x, arg(args, 0))),
+			If(eq(nargs(args), c32(2)), Set(res, arg(args, 1))),
+			If(get(kw), forRange(i, c32(0), ld(get(kw), offDictUsed),
+				Set(e, add(ld(get(kw), offDictEntries), mul(get(i), c32(12)))),
+				Set(k, ld(get(e), 4)),
+				If(get(k), Seq{
+					IfElse(r.Call("str_eq", get(k), r.S("x")), []Expr{
+						If(get(x), r.Fail("int: got multiple values for keyword argument \"x\"")),
+						Set(x, ld(get(e), 8)),
+					}, []Expr{
+						IfElse(r.Call("str_eq", get(k), r.S("base")), []Expr{
+							If(get(res), r.Fail("int: got multiple values for keyword argument \"base\"")),
+							Set(res, ld(get(e), 8)),
+						}, []Expr{
+							r.Fail("int: unexpected keyword argument ", r.Call("quote", get(k))),
+						}),
+					}),
+				}),
+			)),
+			If(eqz(get(x)), r.Fail("int: missing argument for x")),
 			Set(base, c32(10)),
-			If(eq(nargs(args), c32(2)), Seq{Set(base, r.Call("as_i32", arg(args, 1), r.S("int: base"))), Set(hasBase, c32(1))}),
-			If(get(kw), Seq{
-				Set(res, r.Call("dict_get", get(kw), r.S("base"))),
-				If(get(res), Seq{Set(base, r.Call("as_i32", get(res), r.S("int: base"))), Set(hasBase, c32(1))}),
-			}),
+			If(get(res), Seq{Set(base, r.Call("as_i32", get(res), r.S("int: base"))), Set(hasBase, c32(1))}),
 			If(isTag(get(x), TString), Seq{
 				If(and(ne(get(base), c32(0)), or(lt(get(base), c32(2)), gt(get(base), c32(36)))),
 					r.Fail("int: base must be an integer >= 2 && <= 36")),
@@ -179,7 +198,8 @@ func (r *RT) registerBuiltins() {
 			If(isTag(get(x), TFloat), Seq{
 				Set(fl, f64v(get(x))),
 				If(F64Ne(get(fl), get(fl)), r.Fail("int: cannot convert float NaN to integer")),
-				If(F64Ge(F64Abs(get(fl)), F64c(9.223372036854775807e18)), r.Fail("int: cannot convert float to integer: out of range")),
+				If(or(F64Lt(get(fl), F64c(-9223372036854775808.0)), F64Ge(get(fl), F64c(9223372036854775808.0))),
+					r.Fail("int: cannot convert float to integer: out of range")),
 				Return(r.Call("int", I64TruncSatF64S(get(fl)))),
 			}),
 			r.Fail("int: unsupported type ", r.TypeName(get(x))),
@@ -458,8 +478,8 @@ func (r *RT) registerBuiltins() {
 				Set(x, arg(args, 1)),
 				If(not(isTag(get(x), TString)), r.Fail(name+": got ", r.TypeName(get(x)), ", want string")),
 				Set(b, slen(get(s))),
-				If(optArg(args, 2), Set(a, I32WrapI64(r.Call("clamp", r.Call("as_int", arg(args, 2), r.S(name)), slen(get(s)), c32(0))))),
-				If(optArg(args, 3), Set(b, I32WrapI64(r.Call("clamp", r.Call("as_int", arg(args, 3), r.S(name)), slen(get(s)), c32(0))))),
+				If(optArg(args, 2), Set(a, I32WrapI64(r.Call("clamp", r.Call("as_int", arg(args, 2), r.S(name)), I64ExtendI32S(slen(get(s))), c32(0))))),
+				If(optArg(args, 3), Set(b, I32WrapI64(r.Call("clamp", r.Call("as_int", arg(args, 3), r.S(name)), I64ExtendI32S(slen(get(s))), c32(0))))),
 				r.Call("int", I64ExtendI32S(r.Call("str_"+name, get(s), get(x), get(a), get(b)))),
 			)
 		})
@@ -474,13 +494,14 @@ func (r *RT) registerBuiltins() {
 		f.Add(r.checkArgs("lower", args, kw, 1, 1), r.Call("str_lower", arg(args, 0)))
 	})
 
-	// parse_float(s) -> float object or 0
+	// parse_float(s) -> float object or 0. The digits are read into an
+	// exact decimal, so the result is correctly rounded.
 	r.define("parse_float", p1, r1, func(f *Func) {
 		s := f.Param(0)
-		i, n, c, neg, exp, eneg, ev, digits, seen := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32),
-			f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
-		m := f.Local(I64)
+		i, n, c, neg, eneg, ev, dot, seen := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32),
+			f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
 		v := f.Local(F64)
+		d := r.decV(0)
 		brk, cont := NewLabel(), NewLabel()
 		at := func() Expr { return I32Load8U(add(sbytes(get(s)), get(i)), 0) }
 		isDigit := func(x Expr) Expr { return and(ge(x, c32('0')), le(x, c32('9'))) }
@@ -495,40 +516,49 @@ func (r *RT) registerBuiltins() {
 			If(or(r.Call("str_eq", get(c), r.S("inf")), r.Call("str_eq", get(c), r.S("infinity"))),
 				Return(r.Call("float", IfV(F64, get(neg), F64c(negInf), F64c(posInf))))),
 			If(r.Call("str_eq", get(c), r.S("nan")), Return(r.Call("float", F64Div(F64c(0), F64c(0))))),
+			dsetNd(d, c32(0)), dsetDp(d, c32(0)), dsetTrunc(d, c32(0)),
 			Block(brk, Loop(cont,
 				BrIf(brk, ge(get(i), get(n))),
 				Set(c, at()),
 				IfElse(isDigit(get(c)), []Expr{
 					Set(seen, c32(1)),
-					IfElse(lt(get(digits), c32(18)), []Expr{
-						Set(m, I64Add(I64Mul(get(m), I64c(10)), I64ExtendI32U(sub(get(c), c32('0'))))),
-						If(or(get(digits), ne(get(c), c32('0'))), Set(digits, add(get(digits), c32(1)))),
-						If(get(ev), Set(exp, sub(get(exp), c32(1)))),
+					IfElse(and(eq(get(c), c32('0')), eqz(dnd(d))), []Expr{
+						// leading zeros only move the decimal point
+						dsetDp(d, sub(ddp(d), c32(1))),
 					}, []Expr{
-						If(eqz(get(ev)), Set(exp, add(get(exp), c32(1)))),
+						IfElse(lt(dnd(d), c32(decCap)), []Expr{
+							dset(d, dnd(d), sub(get(c), c32('0'))),
+							dsetNd(d, add(dnd(d), c32(1))),
+						}, []Expr{
+							If(ne(get(c), c32('0')), dsetTrunc(d, c32(1))),
+						}),
 					}),
 				}, []Expr{
-					IfElse(and(eq(get(c), c32('.')), eqz(get(ev))), []Expr{Set(ev, c32(1))}, []Expr{Br(brk)}),
+					IfElse(and(eq(get(c), c32('.')), eqz(get(dot))), []Expr{
+						Set(dot, c32(1)),
+						dsetDp(d, dnd(d)),
+					}, []Expr{Br(brk)}),
 				}),
 				Set(i, add(get(i), c32(1))),
 				Br(cont),
 			)),
 			If(eqz(get(seen)), Return(c32(0))),
+			If(eqz(get(dot)), dsetDp(d, dnd(d))),
 			If(lt(get(i), get(n)), Seq{
 				If(ne(I32Or(at(), c32(0x20)), c32('e')), Return(c32(0))),
 				Set(i, add(get(i), c32(1))),
 				If(ge(get(i), get(n)), Return(c32(0))),
 				If(or(eq(at(), c32('-')), eq(at(), c32('+'))), Seq{Set(eneg, eq(at(), c32('-'))), Set(i, add(get(i), c32(1)))}),
 				If(ge(get(i), get(n)), Return(c32(0))),
-				Set(ev, c32(0)),
 				forRange(i, get(i), get(n),
 					If(not(isDigit(at())), Return(c32(0))),
-					If(lt(get(ev), c32(100000)), Set(ev, add(mul(get(ev), c32(10)), sub(at(), c32('0'))))),
+					If(lt(get(ev), c32(10000)), Set(ev, add(mul(get(ev), c32(10)), sub(at(), c32('0'))))),
 				),
-				Set(exp, IfV(I32, get(eneg), sub(get(exp), get(ev)), add(get(exp), get(ev)))),
+				dsetDp(d, IfV(I32, get(eneg), sub(ddp(d), get(ev)), add(ddp(d), get(ev)))),
 			}),
-			Set(v, r.Call("f64_scale", F64ConvI64S(get(m)), get(exp))),
-			r.Call("float", IfV(F64, get(neg), F64Neg(get(v)), get(v))),
+			Set(v, r.Call("dec_to_f64", d, get(neg))),
+			If(F64Eq(F64Abs(get(v)), F64c(posInf)), r.Fail("floating-point number too large")),
+			r.Call("float", get(v)),
 		)
 	})
 }

@@ -148,6 +148,7 @@ type RT struct {
 	Cursor   *Global // ABI encoder/decoder cursor
 	IntCache *Global // table of preallocated small ints, or 0
 	HeapMax  *Global // high-water mark of the heap
+	CmpDepth *Global // nesting depth of the current comparison
 
 	None, False, True uint32
 
@@ -158,7 +159,8 @@ type RT struct {
 	builtins map[string]uint32
 	fixups   []Expr // stores executed by init_static
 
-	scratch uint32 // 16 bytes of static scratch memory
+	scratch uint32    // 16 bytes of static scratch memory
+	decs    [3]uint32 // static decimals for float conversion (decimal.go)
 
 	// Methods maps "type.method" to the global slot holding the callable.
 	methodNames   []string
@@ -194,6 +196,7 @@ func New(m *Module, cfg Config) *RT {
 	r.Cursor = m.AddGlobal(&Global{Name: "cursor", Type: I32, Mutable: true})
 	r.IntCache = m.AddGlobal(&Global{Name: "int_cache", Type: I32, Mutable: true})
 	r.HeapMax = m.AddGlobal(&Global{Name: "heap_max", Type: I32, Mutable: true})
+	r.CmpDepth = m.AddGlobal(&Global{Name: "cmp_depth", Type: I32, Mutable: true})
 
 	r.None = m.Static(8, 8)
 	m.PutU32(r.None, TNone|1<<8)
@@ -212,6 +215,7 @@ func New(m *Module, cfg Config) *RT {
 	r.registerCore()
 	r.registerNum()
 	r.registerStr()
+	r.registerDecimal()
 	r.registerColl()
 	r.registerCall()
 	r.registerCallExtras()
@@ -531,7 +535,7 @@ func (r *RT) registerCore() {
 	// fail(msg string): records the error and traps.
 	r.define("fail", p1, r0, func(f *Func) {
 		msg := f.Param(0)
-		f.Add(GSet(r.ErrObj, get(msg)))
+		f.Add(GSet(r.ErrObj, get(msg)), GSet(r.CmpDepth, c32(0)))
 		if r.Cfg.Command {
 			f.Add(
 				Drop(r.Call("write", c32(2), r.S("Error: "))),
