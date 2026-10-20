@@ -15,6 +15,7 @@
 *.out
 coverage.*
 !coverage.go
+!scripts/coverage.sh
 *.coverprofile
 profile.cov
 
