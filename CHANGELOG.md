@@ -6,6 +6,11 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+* `starc version` reports the module version for binaries installed with
+  `go install`, instead of `dev`.
+
 ## [0.1.0] - 2026-10-20
 
 ### Added
