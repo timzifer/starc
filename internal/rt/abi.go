@@ -1,7 +1,7 @@
 package rt
 
 import (
-	. "github.com/timzifer/starc/internal/wasm" //nolint:revive // DSL
+	. "github.com/timzifer/starc/internal/wasm"
 )
 
 // ABI value tags. See docs/abi.md.

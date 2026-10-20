@@ -5,6 +5,7 @@ package compiler
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -13,7 +14,7 @@ import (
 	"go.starlark.net/syntax"
 
 	"github.com/timzifer/starc/internal/rt"
-	. "github.com/timzifer/starc/internal/wasm" //nolint:revive // DSL
+	. "github.com/timzifer/starc/internal/wasm"
 )
 
 //go:embed prelude.star
@@ -98,7 +99,7 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 	popts := &syntax.FileOptions{Set: false, While: true, TopLevelControl: true, GlobalReassign: true, Recursion: true}
 	pfile, err := popts.Parse("<prelude>", preludeSrc, 0)
 	if err != nil {
-		return nil, fmt.Errorf("internal error: prelude: %v", err)
+		return nil, fmt.Errorf("internal error: prelude: %w", err)
 	}
 	m := &Module{ExportMemory: "memory", Names: opts.Names}
 	r := rt.New(m, rt.Config{Command: opts.Command})
@@ -108,7 +109,7 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		return name == "None" || name == "True" || name == "False" || r.HasBuiltin(name)
 	}
 	if err := resolve.File(pfile, func(string) bool { return false }, preludeUniverse); err != nil {
-		return nil, fmt.Errorf("internal error: prelude: %v", err)
+		return nil, fmt.Errorf("internal error: prelude: %w", err)
 	}
 	c.prelude = c.newUnit("prelude", pfile, popts, true)
 
@@ -116,7 +117,8 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 	dialect := opts.Dialect
 	file, err := dialect.Parse(filename, src, 0)
 	if err != nil {
-		if se, ok := err.(syntax.Error); ok {
+		var se syntax.Error
+		if errors.As(err, &se) {
 			return nil, ErrorList{{se.Pos, se.Msg}}
 		}
 		return nil, err
@@ -134,7 +136,8 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		return r.HasBuiltin(name)
 	}
 	if err := resolve.File(file, func(string) bool { return false }, universe); err != nil {
-		if el, ok := err.(resolve.ErrorList); ok {
+		var el resolve.ErrorList
+		if errors.As(err, &el) {
 			var out ErrorList
 			for _, e := range el {
 				out = append(out, Error{e.Pos, e.Msg})

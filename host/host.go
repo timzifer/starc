@@ -85,7 +85,7 @@ func metaOf(cm wazero.CompiledModule) (*Meta, error) {
 		if cs.Name() == "starc.meta" {
 			var m Meta
 			if err := json.Unmarshal(cs.Data(), &m); err != nil {
-				return nil, fmt.Errorf("host: invalid starc.meta section: %v", err)
+				return nil, fmt.Errorf("host: invalid starc.meta section: %w", err)
 			}
 			return &m, nil
 		}
@@ -107,7 +107,7 @@ func Load(ctx context.Context, wasm []byte, cfg *Config) (*Module, error) {
 	}
 	fail := func(err error) (*Module, error) {
 		if m.ownRT {
-			m.rt.Close(ctx)
+			_ = m.rt.Close(ctx)
 		}
 		return nil, err
 	}
@@ -152,7 +152,7 @@ func Load(ctx context.Context, wasm []byte, cfg *Config) (*Module, error) {
 	}
 	if _, err := mod.ExportedFunction("_initialize").Call(ctx); err != nil {
 		e := m.starlarkError(ctx, err)
-		mod.Close(ctx)
+		_ = mod.Close(ctx)
 		return fail(e)
 	}
 	return m, nil

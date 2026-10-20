@@ -5,7 +5,7 @@ import (
 	"go.starlark.net/syntax"
 
 	"github.com/timzifer/starc/internal/rt"
-	. "github.com/timzifer/starc/internal/wasm" //nolint:revive // DSL
+	. "github.com/timzifer/starc/internal/wasm"
 )
 
 // fcomp compiles one function body (or a unit's top-level code).
@@ -114,7 +114,7 @@ func (fc *fcomp) function(fn *resolve.Function, outer *fcomp) Expr {
 	f.Add(inner.ret(r.NoneV()))
 
 	// Closure construction in the enclosing function.
-	var defs Expr = I32c(0)
+	defs := I32c(0)
 	anyDefault := false
 	for _, d := range defaults {
 		if d != nil {
@@ -132,7 +132,7 @@ func (fc *fcomp) function(fn *resolve.Function, outer *fcomp) Expr {
 		}
 		defs = Get(t)
 	}
-	var freev Expr = I32c(0)
+	freev := I32c(0)
 	if len(fn.FreeVars) > 0 {
 		t := fc.tmp()
 		code = append(code, Set(t, r.Call("tuple_new", I32c(int32(len(fn.FreeVars))))))
@@ -592,7 +592,7 @@ func (fc *fcomp) call(e *syntax.CallExpr) Expr {
 	}
 
 	// Keyword arguments.
-	var kw Expr = I32c(0)
+	kw := I32c(0)
 	if len(kwNames) > 0 || len(kwStar) > 0 {
 		d := fc.tmp()
 		code = append(code, Set(d, r.Call("dict_new")))

@@ -235,13 +235,12 @@ func (m *Module) Encode() (out []byte, err error) {
 	}
 	section(3, p)
 
-	// Table section.
-	if len(l.table) > 0 {
-		p = appendULEB(nil, 1)
-		p = append(p, 0x70, 0x00)
-		p = appendULEB(p, uint64(len(l.table)))
-		section(4, p)
-	}
+	// Table section. It is always present because call_indirect requires
+	// a table even if no function has been placed in it.
+	p = appendULEB(nil, 1)
+	p = append(p, 0x70, 0x00)
+	p = appendULEB(p, uint64(len(l.table)))
+	section(4, p)
 
 	// Memory section.
 	pages := m.MinPages

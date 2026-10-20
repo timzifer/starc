@@ -121,11 +121,6 @@ type Export struct {
 	Func *Func
 }
 
-// Data is a block of static memory.
-type Data struct {
-	buf []byte
-}
-
 // Module is a WebAssembly module under construction.
 type Module struct {
 	Funcs   []*Func

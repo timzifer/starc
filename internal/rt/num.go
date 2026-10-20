@@ -3,7 +3,7 @@ package rt
 import (
 	"math"
 
-	. "github.com/timzifer/starc/internal/wasm" //nolint:revive // DSL
+	. "github.com/timzifer/starc/internal/wasm"
 )
 
 // Binary operator names, used in error messages and by the compiler.

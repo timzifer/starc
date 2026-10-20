@@ -1,7 +1,7 @@
 package rt
 
 import (
-	. "github.com/timzifer/starc/internal/wasm" //nolint:revive // DSL
+	. "github.com/timzifer/starc/internal/wasm"
 )
 
 func (r *RT) registerColl() {
@@ -234,7 +234,7 @@ func (r *RT) registerColl() {
 	// dict_rehash(d, cap): compacts entries into a table of the given capacity
 	r.define("dict_rehash", p2, r0, func(f *Func) {
 		d, c := f.Param(0), f.Param(1)
-		old, oldUsed, ents, i, n, e, ne_ := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
+		old, oldUsed, ents, i, n, e, ne2 := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
 		f.Add(
 			Set(old, ld(get(d), offDictEntries)),
 			Set(oldUsed, ld(get(d), offDictUsed)),
@@ -246,8 +246,8 @@ func (r *RT) registerColl() {
 			forRange(i, c32(0), get(oldUsed),
 				Set(e, add(get(old), mul(get(i), c32(12)))),
 				If(ld(get(e), 4), Seq{
-					Set(ne_, add(get(ents), mul(get(n), c32(12)))),
-					MemoryCopy(get(ne_), get(e), c32(12)),
+					Set(ne2, add(get(ents), mul(get(n), c32(12)))),
+					MemoryCopy(get(ne2), get(e), c32(12)),
 					Set(n, add(get(n), c32(1))),
 					r.Call("dict_index_insert", get(d), get(n), ld(get(e), 0)),
 				}),

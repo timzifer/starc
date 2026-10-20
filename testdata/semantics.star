@@ -88,3 +88,10 @@ print(min([4, 2, 8]), max(4, 2, 8, key = lambda v: -v), any([]), all([]))
 print(hasattr("", "split"), hasattr([], "nope"), getattr([1], "append") != None, getattr({}, "zzz", "dflt"))
 print(dir({})[:4], bool(0.0), bool("x"), int(False), float(True), str(1.0), repr("\x01"))
 print(dict(x = 1, y = 2), dict({"a": 1}, b = 2), list({"k": 1}), tuple("ab".elems()))
+---
+# Dict union and misc operators.
+a = {"x": 1, "y": 2}
+b = {"y": 3, "z": 4}
+print(a | b, b | a, a)
+print([1, 2] + [3], (1,) + (2, 3), "ab" + "cd", [0] * 3, 3 * (1, 2), -2 * [1])
+print(1 if [] else 2, [] or {} or "last", "first" and 0)

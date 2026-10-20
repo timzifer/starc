@@ -1,7 +1,7 @@
 package rt
 
 import (
-	. "github.com/timzifer/starc/internal/wasm" //nolint:revive // DSL
+	. "github.com/timzifer/starc/internal/wasm"
 )
 
 func sbytes(s Expr) Expr { return add(s, c32(offStrBytes)) }
@@ -296,7 +296,6 @@ func (r *RT) registerStr() {
 		lo, hi int
 		delta  int
 	}{{"str_upper", 'a', 'z', -32}, {"str_lower", 'A', 'Z', 32}} {
-		c := c
 		r.define(c.name, p1, r1, func(f *Func) {
 			s := f.Param(0)
 			o, i, ch := f.Local(I32), f.Local(I32), f.Local(I32)

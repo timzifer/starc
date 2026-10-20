@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"math"
 
-	. "github.com/timzifer/starc/internal/wasm" //nolint:revive // DSL
+	. "github.com/timzifer/starc/internal/wasm"
 )
 
 // Value type tags (byte 0 of every heap object).
@@ -556,7 +556,7 @@ func (r *RT) registerCore() {
 		v := f.Param(0)
 		names := []string{"NoneType", "bool", "int", "float", "string", "tuple", "list", "dict",
 			"function", "builtin_function_or_method", "cell", "range", "builtin_function_or_method"}
-		var body Expr = r.S("unknown")
+		body := r.S("unknown")
 		for t := len(names) - 1; t >= 0; t-- {
 			body = IfV(I32, isTag(get(v), t), r.S(names[t]), body)
 		}

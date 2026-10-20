@@ -1,7 +1,7 @@
 package rt
 
 import (
-	. "github.com/timzifer/starc/internal/wasm" //nolint:revive // DSL
+	. "github.com/timzifer/starc/internal/wasm"
 )
 
 func (r *RT) registerCall() {
@@ -143,7 +143,7 @@ func (r *RT) registerCall() {
 	// method_id(name string) -> id or -1
 	r.define("method_id", p1, r1, func(f *Func) {
 		f.Add(Raw(func() Expr {
-			var body Expr = c32(-1)
+			body := c32(-1)
 			for id := len(r.methodNames) - 1; id >= 0; id-- {
 				body = IfV(I32, r.Call("str_eq", get(f.Param(0)), addr(r.strs[r.methodNames[id]])), c32(id), body)
 			}

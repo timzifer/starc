@@ -28,9 +28,8 @@ def fib(n):
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer m.Close(ctx)
-
 	res, err := m.Call(ctx, "fib", 50)
+	m.Close(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}

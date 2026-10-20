@@ -21,7 +21,7 @@ type chunk struct {
 	src  string
 }
 
-func readChunks(t *testing.T, path string) []chunk {
+func readChunks(t testing.TB, path string) []chunk {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

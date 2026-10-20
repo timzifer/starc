@@ -3,7 +3,7 @@ package rt
 import (
 	"sort"
 
-	. "github.com/timzifer/starc/internal/wasm" //nolint:revive // DSL
+	. "github.com/timzifer/starc/internal/wasm"
 )
 
 // builtin defines a Starlark-callable primitive named "bi."+name.
@@ -436,7 +436,6 @@ func (r *RT) registerBuiltins() {
 		)
 	})
 	for name, mode := range map[string]int{"keys": 0, "values": 1, "items": 2} {
-		mode := mode
 		r.builtin("dict."+name, func(f *Func, args, kw Local) {
 			f.Add(r.checkArgs(name, args, kw, 1, 1), r.Call("dict_view", arg(args, 0), c32(mode)))
 		})
@@ -447,7 +446,6 @@ func (r *RT) registerBuiltins() {
 
 	// ---- string methods ----
 	for _, name := range []string{"find", "rfind"} {
-		name := name
 		r.builtin("str."+name, func(f *Func, args, kw Local) {
 			s, a, b, x := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
 			f.Add(
