@@ -358,7 +358,7 @@ func (c *compiler) exportWrapper(name string) *Func {
 	f := c.m.AddFunc(NewFunc("export."+name, []ValType{I32, I32}, I64))
 	ptr, n := f.Param(0), f.Param(1)
 	fn, kw, args := f.Local(I32), f.Local(I32), f.Local(I32)
-	f.Add(If(I32Eqz(Get(ptr)), GSet(r.Heap, GGet(r.HeapMark))))
+	f.Add(If(I32Eqz(Get(ptr)), r.Call("arena_reset")))
 	for _, s := range c.specs {
 		f.Add(r.Leave(s))
 	}

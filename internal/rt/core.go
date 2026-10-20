@@ -144,6 +144,7 @@ type RT struct {
 	ErrObj   *Global // string object with the last error message
 	Cursor   *Global // ABI encoder/decoder cursor
 	IntCache *Global // table of preallocated small ints, or 0
+	HeapMax  *Global // high-water mark of the heap
 
 	None, False, True uint32
 
@@ -189,6 +190,7 @@ func New(m *Module, cfg Config) *RT {
 	r.ErrObj = m.AddGlobal(&Global{Name: "err", Type: I32, Mutable: true})
 	r.Cursor = m.AddGlobal(&Global{Name: "cursor", Type: I32, Mutable: true})
 	r.IntCache = m.AddGlobal(&Global{Name: "int_cache", Type: I32, Mutable: true})
+	r.HeapMax = m.AddGlobal(&Global{Name: "heap_max", Type: I32, Mutable: true})
 
 	r.None = m.Static(8, 8)
 	m.PutU32(r.None, TNone|1<<8)
@@ -263,6 +265,7 @@ func (r *RT) Finish() *Func {
 	end := (r.M.DataEnd() + 7) &^ 7
 	r.Heap.Init = int64(end)
 	r.HeapMark.Init = int64(end)
+	r.HeapMax.Init = int64(end)
 	return f
 }
 
@@ -486,19 +489,39 @@ func (r *RT) bool(cond Expr) Expr { return Select(r.TrueV(), r.FalseV(), cond) }
 
 func (r *RT) registerCore() {
 	// alloc(n) -> zeroed, 8-aligned memory
+	// alloc(n) -> zeroed, 8-aligned memory. Memory above the high-water
+	// mark HeapMax has never been used and is zero; arena_reset clears
+	// the reused region in bulk, so alloc itself never clears memory.
 	r.define("alloc", p1, r1, func(f *Func) {
 		n := f.Param(0)
-		p, end := f.Local(I32), f.Local(I32)
+		p, end, need, pages := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
 		f.Add(
 			Set(p, GGet(r.Heap)),
 			Set(end, add(get(p), and(add(get(n), c32(7)), c32(-8)))),
-			If(I32GtU(get(end), I32Shl(MemorySize(), c32(16))),
-				If(eq(MemoryGrow(I32ShrU(add(sub(get(end), I32Shl(MemorySize(), c32(16))), c32(0xffff)), c32(16))), c32(-1)),
-					r.Fail("out of memory")),
-			),
+			If(I32LtU(get(end), get(p)), r.Fail("out of memory")),
+			If(I32GtU(get(end), I32Shl(MemorySize(), c32(16))), Seq{
+				// Grow geometrically, by at least 4 MiB, to keep the number
+				// of (expensive) grow operations small.
+				Set(need, I32ShrU(add(sub(get(end), I32Shl(MemorySize(), c32(16))), c32(0xffff)), c32(16))),
+				Set(pages, MemorySize()),
+				If(I32LtU(get(pages), c32(64)), Set(pages, c32(64))),
+				If(I32GtU(get(pages), c32(4096)), Set(pages, c32(4096))),
+				If(I32LtU(get(pages), get(need)), Set(pages, get(need))),
+				If(eq(MemoryGrow(get(pages)), c32(-1)),
+					If(eq(MemoryGrow(get(need)), c32(-1)), r.Fail("out of memory"))),
+			}),
 			GSet(r.Heap, get(end)),
-			MemoryFill(get(p), c32(0), get(n)),
+			If(I32GtU(get(end), GGet(r.HeapMax)), GSet(r.HeapMax, get(end))),
 			get(p),
+		)
+	})
+
+	// arena_reset(): discards everything allocated since HeapMark.
+	r.define("arena_reset", p0, r0, func(f *Func) {
+		f.Add(
+			MemoryFill(GGet(r.HeapMark), c32(0), sub(GGet(r.HeapMax), GGet(r.HeapMark))),
+			GSet(r.Heap, GGet(r.HeapMark)),
+			GSet(r.HeapMax, GGet(r.HeapMark)),
 		)
 	})
 

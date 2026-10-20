@@ -21,7 +21,7 @@ func (r *RT) registerABI() {
 	// abi_alloc(n): resets the per-call arena and allocates n bytes for
 	// the host to write call arguments into.
 	r.define("abi_alloc", p1, r1, func(f *Func) {
-		f.Add(GSet(r.Heap, GGet(r.HeapMark)), r.Call("alloc", get(f.Param(0))))
+		f.Add(r.Call("arena_reset"), r.Call("alloc", get(f.Param(0))))
 	})
 	// abi_error() -> packed (ptr | len<<32) of the last error message
 	r.define("abi_error", p0, ri, func(f *Func) {
