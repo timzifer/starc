@@ -1,0 +1,64 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - gocritic
+    - gosec
+    - misspell
+    - nolintlint
+    - revive
+    - unconvert
+    - unparam
+    - whitespace
+  settings:
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+        - name: var-naming
+        - name: indent-error-flow
+        - name: errorf
+        - name: blank-imports
+        - name: dot-imports
+          arguments:
+            - allowed-packages:
+                - github.com/timzifer/starc/internal/wasm
+    gocritic:
+      disabled-checks:
+        - ifElseChain
+        - singleCaseSwitch
+        - appendAssign
+    gosec:
+      excludes:
+        - G115 # integer conversions are intentional in the encoder and runtime
+        - G304 # reading user-specified source files is the purpose of the tool
+    staticcheck:
+      dot-import-whitelist:
+        - github.com/timzifer/starc/internal/wasm
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+          - unparam
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/timzifer/starc
