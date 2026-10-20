@@ -62,10 +62,12 @@ loops), `TopLevelControl` (`if`/`for`/`while` at top level),
 
 * **Integers are 64-bit.** Arithmetic that overflows is a run-time error
   (`int overflow`) instead of producing a big integer.
-* **Float formatting** uses a shortest-round-trip search based on
-  float64 arithmetic. For values with very large or very small exponents
-  (beyond about 10^±290) the last digit can differ from the reference.
-  `%e`/`%f` formatting supports magnitudes below about 9.2e18.
+* `str(float)` and `float(string)` match the reference exactly (shortest
+  round-trip formatting, correctly rounded parsing). `%e`/`%f` formatting
+  supports magnitudes below about 9.2e18.
+* `len`, indexing and slicing of a `range` support 64-bit lengths, but a
+  range with more than 2^31-1 elements cannot be iterated or converted to
+  a list; doing so is a run-time error.
 * `%` formatting supports the conversions `s r d i x X o c e E f F g G`
   and `%%`, without width, precision or flags; `str.format` supports
   `{}`, `{0}`, `{name}`, `!s` and `!r` without format specifications.
