@@ -6,6 +6,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-20
+
 ### Fixed
 
 * `starc version` reports the module version for binaries installed with
@@ -24,5 +26,6 @@ and the project follows [Semantic Versioning](https://semver.org/).
 * Package `host` for running compiled modules with wazero.
 * Conformance test suite against go.starlark.net.
 
-[Unreleased]: https://github.com/timzifer/starc/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/timzifer/starc/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/timzifer/starc/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/timzifer/starc/releases/tag/v0.1.0
