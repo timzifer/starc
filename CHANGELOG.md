@@ -6,6 +6,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-20
+
 ### Added
 
 * Ahead-of-time compiler from Starlark to standalone WebAssembly modules,
@@ -16,3 +18,6 @@ and the project follows [Semantic Versioning](https://semver.org/).
   (package `abi`), and WASI command modules.
 * Package `host` for running compiled modules with wazero.
 * Conformance test suite against go.starlark.net.
+
+[Unreleased]: https://github.com/timzifer/starc/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/timzifer/starc/releases/tag/v0.1.0
