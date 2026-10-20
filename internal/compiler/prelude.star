@@ -55,7 +55,7 @@ def sorted(iterable, *, key = None, reverse = False):
         width *= 2
     return [xs[i] for i in idx]
 
-def _extremum(name, args, key, want_max, default, has_default):
+def _extremum(name, args, key, want_max):
     if len(args) == 0:
         _error(name + ": got 0 arguments, want at least 1")
     if len(args) == 1:
@@ -63,8 +63,6 @@ def _extremum(name, args, key, want_max, default, has_default):
     else:
         xs = list(args)
     if len(xs) == 0:
-        if has_default:
-            return default
         _error(name + ": argument is an empty sequence")
     best = xs[0]
     if key == None:
@@ -85,15 +83,11 @@ def _extremum(name, args, key, want_max, default, has_default):
             best_key = k
     return best
 
-def min(*args, key = None, **kwargs):
-    if len(kwargs) > 1 or (len(kwargs) == 1 and "default" not in kwargs):
-        _error("min: unexpected keyword arguments")
-    return _extremum("min", args, key, False, kwargs.get("default"), "default" in kwargs)
+def min(*args, key = None):
+    return _extremum("min", args, key, False)
 
-def max(*args, key = None, **kwargs):
-    if len(kwargs) > 1 or (len(kwargs) == 1 and "default" not in kwargs):
-        _error("max: unexpected keyword arguments")
-    return _extremum("max", args, key, True, kwargs.get("default"), "default" in kwargs)
+def max(*args, key = None):
+    return _extremum("max", args, key, True)
 
 def any(x):
     for e in x:

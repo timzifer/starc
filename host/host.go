@@ -237,4 +237,3 @@ func (m *Module) Close(ctx context.Context) error {
 	}
 	return err
 }
-

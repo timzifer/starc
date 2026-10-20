@@ -143,6 +143,7 @@ type RT struct {
 	HeapMark *Global // arena reset point
 	ErrObj   *Global // string object with the last error message
 	Cursor   *Global // ABI encoder/decoder cursor
+	IntCache *Global // table of preallocated small ints, or 0
 
 	None, False, True uint32
 
@@ -187,6 +188,7 @@ func New(m *Module, cfg Config) *RT {
 	r.HeapMark = m.AddGlobal(&Global{Name: "heap_mark", Type: I32, Mutable: true})
 	r.ErrObj = m.AddGlobal(&Global{Name: "err", Type: I32, Mutable: true})
 	r.Cursor = m.AddGlobal(&Global{Name: "cursor", Type: I32, Mutable: true})
+	r.IntCache = m.AddGlobal(&Global{Name: "int_cache", Type: I32, Mutable: true})
 
 	r.None = m.Static(8, 8)
 	m.PutU32(r.None, TNone|1<<8)
@@ -244,6 +246,19 @@ func (r *RT) Call(name string, args ...Expr) Expr { return Call(r.Fn(name), args
 func (r *RT) Finish() *Func {
 	f := r.M.AddFunc(NewFunc("rt.init_static", nil))
 	f.Add(r.fixups...)
+	if _, ok := r.funcs["int"]; ok {
+		t, i, o := f.Local(I32), f.Local(I32), f.Local(I32)
+		f.Add(
+			Set(t, r.Call("alloc", c32(4*intCacheSize))),
+			forRange(i, c32(0), c32(intCacheSize),
+				Set(o, r.Call("alloc", c32(16))),
+				st(get(o), 0, c32(TInt|1<<8)),
+				I64Store(get(o), offInt, I64ExtendI32S(sub(get(i), c32(intCacheMin)))),
+				st(elem(get(t), 0, get(i)), 0, get(o)),
+			),
+			GSet(r.IntCache, get(t)),
+		)
+	}
 	f.Add(r.methodInit...)
 	end := (r.M.DataEnd() + 7) &^ 7
 	r.Heap.Init = int64(end)

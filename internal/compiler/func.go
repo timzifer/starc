@@ -423,7 +423,7 @@ func (fc *fcomp) expr(e syntax.Expr) Expr {
 		code := Seq{Set(t, r.Call("dict_new"))}
 		for _, x := range e.List {
 			ent := x.(*syntax.DictEntry)
-			code = append(code, r.Call("dict_set", Get(t), fc.expr(ent.Key), fc.expr(ent.Value)))
+			code = append(code, r.Call("dict_lit_set", Get(t), fc.expr(ent.Key), fc.expr(ent.Value)))
 		}
 		return append(code, Get(t))
 

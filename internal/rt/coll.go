@@ -272,7 +272,8 @@ func (r *RT) registerColl() {
 			Set(e, r.Call("dict_lookup", get(d), get(k), get(h))),
 			If(get(e), Seq{st(get(e), 8, get(v)), Return(nil)}),
 			If(ge(ld(get(d), offDictUsed), ld(get(d), offDictCap)), Seq{
-				Set(c, I32Shl(add(ld(get(d), offDictLen), c32(1)), c32(1))),
+				// capacity: the next power of two >= 2*(len+1), at least 8
+				Set(c, I32Shl(c32(1), sub(c32(32), I32Clz(I32Shl(add(ld(get(d), offDictLen), c32(1)), c32(1)))))),
 				If(lt(get(c), c32(8)), Set(c, c32(8))),
 				r.Call("dict_rehash", get(d), get(c)),
 			}),
@@ -284,6 +285,14 @@ func (r *RT) registerColl() {
 			st(get(d), offDictUsed, add(get(n), c32(1))),
 			st(get(d), offDictLen, add(ld(get(d), offDictLen), c32(1))),
 			r.Call("dict_index_insert", get(d), add(get(n), c32(1)), get(h)),
+		)
+	})
+	// dict_lit_set(d, k, v): insertion for dict literals, rejecting duplicates
+	r.define("dict_lit_set", p3, r0, func(f *Func) {
+		d, k, v := f.Param(0), f.Param(1), f.Param(2)
+		f.Add(
+			If(r.Call("dict_get", get(d), get(k)), r.Fail("duplicate key: ", r.Call("repr", get(k)))),
+			r.Call("dict_set", get(d), get(k), get(v)),
 		)
 	})
 	// dict_get(d, k) -> value or 0

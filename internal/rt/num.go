@@ -27,6 +27,12 @@ var BinOps = map[string]string{
 	OpMod: "mod", OpAnd: "bitand", OpOr: "bitor", OpXor: "bitxor", OpShl: "shl", OpShr: "shr",
 }
 
+// Small ints in [-intCacheMin, intCacheSize-intCacheMin) are preallocated.
+const (
+	intCacheMin  = 16
+	intCacheSize = 1040
+)
+
 func i64v(v Expr) Expr { return I64Load(v, offInt) }
 func f64v(v Expr) Expr { return F64Load(v, offFloat) }
 
@@ -34,6 +40,8 @@ func (r *RT) registerNum() {
 	r.define("int", pi, r1, func(f *Func) {
 		o := f.Local(I32)
 		f.Add(
+			If(and(ne(GGet(r.IntCache), c32(0)), I64LtU(I64Add(Get(f.Param(0)), I64c(intCacheMin)), I64c(intCacheSize))),
+				Return(ld(add(GGet(r.IntCache), I32Shl(I32WrapI64(I64Add(Get(f.Param(0)), I64c(intCacheMin))), c32(2))), 0))),
 			Set(o, r.Call("alloc", c32(16))),
 			st(get(o), 0, c32(TInt)),
 			I64Store(get(o), offInt, Get(f.Param(0))),
@@ -213,6 +221,9 @@ func (r *RT) registerNum() {
 				Return(cmp3(I64LtS(i64v(get(a)), i64v(get(b))), I64GtS(i64v(get(a)), i64v(get(b)))))),
 			If(and(r.Call("is_num", get(a)), r.Call("is_num", get(b))), Seq{
 				Set(x, r.Call("to_f64", get(a))), Set(y, r.Call("to_f64", get(b))),
+				// NaN sorts above all other values and equals itself.
+				If(F64Ne(get(x), get(x)), Return(IfV(I32, F64Ne(get(y), get(y)), c32(0), c32(1)))),
+				If(F64Ne(get(y), get(y)), Return(c32(-1))),
 				Return(cmp3(F64Lt(get(x), get(y)), F64Gt(get(x), get(y)))),
 			}),
 			If(ne(get(ta), get(tb)), r.Call("cmp_error", get(a), get(b), get(opn))),
@@ -250,7 +261,7 @@ func (r *RT) registerNum() {
 			If(and(eq(get(ta), c32(TInt)), eq(get(tb), c32(TInt))),
 				Return(I64Eq(i64v(get(a)), i64v(get(b))))),
 			If(and(r.Call("is_num", get(a)), r.Call("is_num", get(b))),
-				Return(F64Eq(r.Call("to_f64", get(a)), r.Call("to_f64", get(b))))),
+				Return(eqz(r.Call("cmp", get(a), get(b), r.S("=="))))),
 			If(eq(get(a), get(b)), Return(c32(1))),
 			If(ne(get(ta), get(tb)), Return(c32(0))),
 			If(eq(get(ta), c32(TString)), Return(r.Call("str_eq", get(a), get(b)))),
