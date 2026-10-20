@@ -35,7 +35,7 @@ const (
 
 // Object layouts (byte offsets).
 const (
-	offFlags = 1 // u8: bit 0 = frozen
+	offFlags = 1 // u8: bit 0 = frozen, bit 1 = being printed by repr
 
 	offBool  = 4
 	offInt   = 8
@@ -92,6 +92,9 @@ const (
 	offSpecActive = 20
 	sizeSpec      = 24
 )
+
+// flagRepr marks a list or dict whose repr is in progress, to detect cycles.
+const flagRepr = 2
 
 // Spec flags.
 const (

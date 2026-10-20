@@ -119,6 +119,9 @@ func Load(ctx context.Context, wasm []byte, cfg *Config) (*Module, error) {
 	if err != nil {
 		return fail(err)
 	}
+	if err := checkExports(cm, meta); err != nil {
+		return fail(err)
+	}
 	m.meta = *meta
 	mc := wazero.NewModuleConfig().WithName("")
 	if cfg.Stdout != nil {
@@ -156,6 +159,62 @@ func Load(ctx context.Context, wasm []byte, cfg *Config) (*Module, error) {
 		return fail(e)
 	}
 	return m, nil
+}
+
+// checkExports verifies that the module's execution model is known and
+// that a reactor module exports the ABI functions with the expected
+// signatures, so that malformed modules are rejected before they run.
+func checkExports(cm wazero.CompiledModule, meta *Meta) error {
+	switch meta.Model {
+	case "command":
+		return nil
+	case "reactor":
+	default:
+		return fmt.Errorf("host: unknown execution model %q in starc.meta", meta.Model)
+	}
+	if len(cm.ExportedMemories()) == 0 {
+		return errors.New("host: module does not export its memory")
+	}
+	defs := cm.ExportedFunctions()
+	check := func(name string, params, results []api.ValueType) error {
+		d, ok := defs[name]
+		if !ok {
+			return fmt.Errorf("host: module does not export required function %q", name)
+		}
+		if !equalTypes(d.ParamTypes(), params) || !equalTypes(d.ResultTypes(), results) {
+			return fmt.Errorf("host: exported function %q has signature %v -> %v, want %v -> %v",
+				name, d.ParamTypes(), d.ResultTypes(), params, results)
+		}
+		return nil
+	}
+	i32, i64 := api.ValueTypeI32, api.ValueTypeI64
+	if err := check("_initialize", nil, nil); err != nil {
+		return err
+	}
+	if err := check("starc_alloc", []api.ValueType{i32}, []api.ValueType{i32}); err != nil {
+		return err
+	}
+	if err := check("starc_error", nil, []api.ValueType{i64}); err != nil {
+		return err
+	}
+	for _, ex := range meta.Exports {
+		if err := check(ex.Name, []api.ValueType{i32, i32}, []api.ValueType{i64}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func equalTypes(a, b []api.ValueType) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // Meta returns the module's metadata.

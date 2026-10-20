@@ -387,10 +387,20 @@ func (r *RT) registerColl() {
 			Set(a, I64Load(get(o), offRangeStart)),
 			Set(b, I64Load(get(o), offRangeStop)),
 			Set(s, I64Load(get(o), offRangeStep)),
-			If(I64GtS(get(s), I64c(0)), Return(IfV(I64, I64LtS(get(a), get(b)),
-				I64DivS(I64Add(I64Sub(get(b), get(a)), I64Sub(get(s), I64c(1))), get(s)), I64c(0)))),
-			IfV(I64, I64GtS(get(a), get(b)),
-				I64DivS(I64Sub(I64Sub(get(a), get(b)), I64Add(get(s), I64c(1))), I64Sub(I64c(0), get(s))), I64c(0)),
+			Return(r.Call("span_count", get(a), get(b), get(s))),
+		)
+	})
+
+	// span_count(a, b, step) -> number of values a, a+step, ... before b.
+	// The distance is computed in unsigned arithmetic, so it cannot
+	// overflow however far apart a and b are.
+	r.define("span_count", []ValType{I64, I64, I64}, ri, func(f *Func) {
+		a, b, s := f.Param(0), f.Param(1), f.Param(2)
+		f.Add(
+			If(I64GtS(Get(s), I64c(0)), Return(IfV(I64, I64LtS(Get(a), Get(b)),
+				I64Add(I64DivU(I64Sub(I64Sub(Get(b), Get(a)), I64c(1)), Get(s)), I64c(1)), I64c(0)))),
+			IfV(I64, I64GtS(Get(a), Get(b)),
+				I64Add(I64DivU(I64Sub(I64Sub(Get(a), Get(b)), I64c(1)), I64Sub(I64c(0), Get(s))), I64c(1)), I64c(0)),
 		)
 	})
 
@@ -510,35 +520,41 @@ func (r *RT) registerColl() {
 	// slice(x, lo, hi, step) with 0 for absent operands
 	r.define("slice", p4, r1, func(f *Func) {
 		x, lov, hiv, stv := f.Param(0), f.Param(1), f.Param(2), f.Param(3)
-		n, t, i, res, base, cnt := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
-		lo, hi, step := f.Local(I64), f.Local(I64), f.Local(I64)
+		n, t, k, res, base, cnt := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
+		lo, hi, step, i, rs := f.Local(I64), f.Local(I64), f.Local(I64), f.Local(I64), f.Local(I64)
 		absent := func(v Local) Expr { return or(eqz(get(v)), isTag(get(v), TNone)) }
-		brk, cont := NewLabel(), NewLabel()
-		cond := IfV(I32, I64GtS(get(step), I64c(0)), I64LtS(I64ExtendI32S(get(i)), get(hi)), I64GtS(I64ExtendI32S(get(i)), get(hi)))
+		// Like Starlark, slice indices and the step must fit in int32.
+		bound := func(v Local) Expr { return I64ExtendI32S(r.Call("as_i32", get(v), r.S("slice index"))) }
 		f.Add(
 			Set(t, tagOf(get(x))),
-			If(not(or(eq(get(t), c32(TString)), or(eq(get(t), c32(TList)), eq(get(t), c32(TTuple))))),
+			If(not(or(or(eq(get(t), c32(TString)), eq(get(t), c32(TRange))), or(eq(get(t), c32(TList)), eq(get(t), c32(TTuple))))),
 				r.Fail("invalid slice operand ", r.TypeName(get(x)))),
-			Set(n, ld(get(x), 4)),
-			Set(step, IfV(I64, absent(stv), I64c(1), r.Call("as_int", get(stv), r.S("slice step")))),
+			Set(n, r.Call("seq_len", get(x))),
+			Set(step, IfV(I64, absent(stv), I64c(1), I64ExtendI32S(r.Call("as_i32", get(stv), r.S("slice step"))))),
 			If(I64Eqz(get(step)), r.Fail("zero is not a valid slice step")),
 			IfElse(I64GtS(get(step), I64c(0)), []Expr{
-				Set(lo, IfV(I64, absent(lov), I64c(0), r.Call("clamp", r.Call("as_int", get(lov), r.S("slice index")), get(n), c32(0)))),
-				Set(hi, IfV(I64, absent(hiv), I64ExtendI32S(get(n)), r.Call("clamp", r.Call("as_int", get(hiv), r.S("slice index")), get(n), c32(0)))),
+				Set(lo, IfV(I64, absent(lov), I64c(0), r.Call("clamp", bound(lov), get(n), c32(0)))),
+				Set(hi, IfV(I64, absent(hiv), I64ExtendI32S(get(n)), r.Call("clamp", bound(hiv), get(n), c32(0)))),
 			}, []Expr{
-				Set(lo, IfV(I64, absent(lov), I64ExtendI32S(sub(get(n), c32(1))), r.Call("clamp", r.Call("as_int", get(lov), r.S("slice index")), get(n), c32(1)))),
-				Set(hi, IfV(I64, absent(hiv), I64c(-1), r.Call("clamp", r.Call("as_int", get(hiv), r.S("slice index")), get(n), c32(1)))),
+				Set(lo, IfV(I64, absent(lov), I64ExtendI32S(sub(get(n), c32(1))), r.Call("clamp", bound(lov), get(n), c32(1)))),
+				Set(hi, IfV(I64, absent(hiv), I64c(-1), r.Call("clamp", bound(hiv), get(n), c32(1)))),
+			}),
+			// An empty selection starts (and ends) at lo for positive steps
+			// and at hi for negative ones, as in Starlark's range slicing.
+			IfElse(I64GtS(get(step), I64c(0)), []Expr{
+				If(I64LtS(get(hi), get(lo)), Set(hi, get(lo))),
+			}, []Expr{
+				If(I64LtS(get(lo), get(hi)), Set(lo, get(hi))),
+			}),
+			If(eq(get(t), c32(TRange)), Seq{
+				Set(i, I64Load(get(x), offRangeStart)),
+				Set(rs, I64Load(get(x), offRangeStep)),
+				Return(r.Call("range_new", I64Add(get(i), I64Mul(get(rs), get(lo))),
+					I64Add(get(i), I64Mul(get(rs), get(hi))), I64Mul(get(rs), get(step)))),
 			}),
 			If(and(eq(get(t), c32(TString)), I64Eq(get(step), I64c(1))),
 				Return(r.Call("str_sub", get(x), I32WrapI64(get(lo)), I32WrapI64(get(hi))))),
-			// count elements
-			Set(i, I32WrapI64(get(lo))),
-			Block(brk, Loop(cont,
-				BrIf(brk, not(cond)),
-				Set(cnt, add(get(cnt), c32(1))),
-				Set(i, add(get(i), I32WrapI64(get(step)))),
-				Br(cont),
-			)),
+			Set(cnt, I32WrapI64(r.Call("span_count", get(lo), get(hi), get(step)))),
 			IfElse(eq(get(t), c32(TString)), []Expr{
 				Set(res, r.Call("str_new", get(cnt))),
 				Set(base, sbytes(get(res))),
@@ -546,19 +562,17 @@ func (r *RT) registerColl() {
 				Set(res, r.Call("tuple_new", get(cnt))),
 				Set(base, add(get(res), c32(offTupElems))),
 			}),
-			Set(i, I32WrapI64(get(lo))),
-			Set(cnt, c32(0)),
-			Block(brk, Loop(cont,
-				BrIf(brk, not(cond)),
+			// Indices are tracked in i64: lo + k*step stays in [-1, n] for
+			// every k < cnt, so the index never overflows.
+			Set(i, get(lo)),
+			forRange(k, c32(0), get(cnt),
 				IfElse(eq(get(t), c32(TString)), []Expr{
-					I32Store8(add(get(base), get(cnt)), 0, I32Load8U(add(sbytes(get(x)), get(i)), 0)),
+					I32Store8(add(get(base), get(k)), 0, I32Load8U(add(sbytes(get(x)), I32WrapI64(get(i))), 0)),
 				}, []Expr{
-					st(elem(get(base), 0, get(cnt)), 0, ld(elem(r.Call("seq_base", get(x)), 0, get(i)), 0)),
+					st(elem(get(base), 0, get(k)), 0, ld(elem(r.Call("seq_base", get(x)), 0, I32WrapI64(get(i))), 0)),
 				}),
-				Set(cnt, add(get(cnt), c32(1))),
-				Set(i, add(get(i), I32WrapI64(get(step)))),
-				Br(cont),
-			)),
+				Set(i, I64Add(get(i), get(step))),
+			),
 			If(eq(get(t), c32(TList)), Return(r.Call("list_of", get(res)))),
 			get(res),
 		)
