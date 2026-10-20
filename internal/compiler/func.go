@@ -325,7 +325,9 @@ func (fc *fcomp) assign(lhs syntax.Expr, v Expr) Expr {
 		}
 		return code
 	case *syntax.IndexExpr:
-		return r.Call("setindex", fc.expr(lhs.X), fc.expr(lhs.Y), v)
+		// The right-hand side is evaluated before the target operands.
+		t := fc.tmp()
+		return Seq{Set(t, v), r.Call("setindex", fc.expr(lhs.X), fc.expr(lhs.Y), Get(t))}
 	}
 	start, _ := lhs.Span()
 	fc.c.errorf(start, "invalid assignment target")

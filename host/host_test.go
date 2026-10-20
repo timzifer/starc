@@ -159,3 +159,27 @@ func TestReadMeta(t *testing.T) {
 		t.Errorf("meta = %+v", meta)
 	}
 }
+
+func TestMalformedModule(t *testing.T) {
+	wasm, err := starc.Compile("m.star", []byte("def f(x):\n    return x\n"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Renaming an export keeps the binary valid but breaks the ABI.
+	for _, name := range []string{"_initialize", "starc_alloc", "starc_error"} {
+		broken := bytes.ReplaceAll(wasm, []byte(name), []byte(name[:len(name)-1]+"X"))
+		_, err := host.Load(context.Background(), broken, nil)
+		if err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s renamed: err = %v", name, err)
+		}
+	}
+	// An export listed in starc.meta must exist.
+	broken := bytes.ReplaceAll(wasm, []byte(`"name":"f"`), []byte(`"name":"g"`))
+	if _, err := host.Load(context.Background(), broken, nil); err == nil || !strings.Contains(err.Error(), `"g"`) {
+		t.Errorf("missing export: err = %v", err)
+	}
+	broken = bytes.ReplaceAll(wasm, []byte(`"model":"reactor"`), []byte(`"model":"reactox"`))
+	if _, err := host.Load(context.Background(), broken, nil); err == nil || !strings.Contains(err.Error(), "model") {
+		t.Errorf("unknown model: err = %v", err)
+	}
+}

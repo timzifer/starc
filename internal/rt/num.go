@@ -197,10 +197,102 @@ func (r *RT) registerNum() {
 		m := f.Local(F64)
 		f.Add(
 			If(F64Eq(Get(b), F64c(0)), r.Fail("floating-point modulo by zero")),
-			Set(m, F64Sub(Get(a), F64Mul(Get(b), F64Trunc(F64Div(Get(a), Get(b)))))),
+			Set(m, r.Call("fmod_exact", Get(a), Get(b))),
 			If(and(F64Ne(Get(m), F64c(0)), ne(F64Lt(Get(m), F64c(0)), F64Lt(Get(b), F64c(0)))),
 				Set(m, F64Add(Get(m), Get(b)))),
 			Get(m),
+		)
+	})
+
+	// fmod_exact(x, y) -> the exact remainder of x/y with the sign of x,
+	// like C's fmod. The quotient is never rounded: the remainder is found
+	// by binary long division on the significands.
+	r.define("fmod_exact", []ValType{F64, F64}, rf, func(f *Func) {
+		x, y := f.Param(0), f.Param(1)
+		ux, uy, d, sx := f.Local(I64), f.Local(I64), f.Local(I64), f.Local(I64)
+		ex, ey := f.Local(I64), f.Local(I64)
+		brk, cont := NewLabel(), NewLabel()
+		const mant = int64(1)<<52 - 1
+		// normalize(u, e): u becomes the significand with an explicit
+		// leading bit at position 52; e the matching biased exponent.
+		normalize := func(u, e Local) Expr {
+			brk, cont := NewLabel(), NewLabel()
+			return IfElse(I64Eqz(Get(e)), []Expr{
+				// subnormal: shift the leading one up to bit 52
+				Set(u, I64And(Get(u), I64c(mant))),
+				Set(e, I64c(1)),
+				Block(brk, Loop(cont,
+					BrIf(brk, I64Ne(I64And(Get(u), I64c(1<<52)), I64c(0))),
+					Set(u, I64Shl(Get(u), I64c(1))),
+					Set(e, I64Sub(Get(e), I64c(1))),
+					Br(cont),
+				)),
+			}, []Expr{
+				Set(u, I64Or(I64And(Get(u), I64c(mant)), I64c(1<<52))),
+			})
+		}
+		f.Add(
+			Set(ux, I64ReinterpF64(Get(x))),
+			Set(uy, I64ReinterpF64(Get(y))),
+			Set(sx, I64And(Get(ux), I64c(math.MinInt64))),
+			Set(ex, I64And(I64ShrU(Get(ux), I64c(52)), I64c(0x7ff))),
+			Set(ey, I64And(I64ShrU(Get(uy), I64c(52)), I64c(0x7ff))),
+			// NaN or infinite x, NaN y, or zero y: NaN
+			If(or(or(I64Eq(Get(ex), I64c(0x7ff)), F64Ne(Get(y), Get(y))), F64Eq(Get(y), F64c(0))),
+				Return(F64Div(F64Mul(Get(x), Get(y)), F64Mul(Get(x), Get(y))))),
+			// |x| < |y| (including infinite y): x; |x| == |y|: signed zero
+			If(I64LtU(I64Shl(Get(ux), I64c(1)), I64Shl(Get(uy), I64c(1))), Return(Get(x))),
+			If(I64Eq(I64Shl(Get(ux), I64c(1)), I64Shl(Get(uy), I64c(1))), Return(F64Mul(F64c(0), Get(x)))),
+			normalize(ux, ex),
+			normalize(uy, ey),
+			// long division: reduce ux modulo uy one exponent step at a time
+			Block(brk, Loop(cont,
+				BrIf(brk, I64LeS(Get(ex), Get(ey))),
+				Set(d, I64Sub(Get(ux), Get(uy))),
+				If(I64GeS(Get(d), I64c(0)), Seq{
+					If(I64Eqz(Get(d)), Return(F64Mul(F64c(0), Get(x)))),
+					Set(ux, Get(d)),
+				}),
+				Set(ux, I64Shl(Get(ux), I64c(1))),
+				Set(ex, I64Sub(Get(ex), I64c(1))),
+				Br(cont),
+			)),
+			Set(d, I64Sub(Get(ux), Get(uy))),
+			If(I64GeS(Get(d), I64c(0)), Seq{
+				If(I64Eqz(Get(d)), Return(F64Mul(F64c(0), Get(x)))),
+				Set(ux, Get(d)),
+			}),
+			// renormalize so the leading bit is at position 52
+			Block(brk, Loop(cont,
+				BrIf(brk, I64Ne(I64And(Get(ux), I64c(1<<52)), I64c(0))),
+				Set(ux, I64Shl(Get(ux), I64c(1))),
+				Set(ex, I64Sub(Get(ex), I64c(1))),
+				Br(cont),
+			)),
+			IfElse(I64GtS(Get(ex), I64c(0)), []Expr{
+				Set(ux, I64Or(I64And(Get(ux), I64c(mant)), I64Shl(Get(ex), I64c(52)))),
+			}, []Expr{
+				Set(ux, I64ShrU(Get(ux), I64Sub(I64c(1), Get(ex)))),
+			}),
+			F64ReinterpI64(I64Or(Get(ux), Get(sx))),
+		)
+	})
+
+	// cmp_int_float(i, x) -> -1, 0, 1 comparing an int with a non-NaN
+	// float exactly, without rounding the int to float64.
+	r.define("cmp_int_float", []ValType{I64, F64}, r1, func(f *Func) {
+		i, x := f.Param(0), f.Param(1)
+		t := f.Local(F64)
+		ti := f.Local(I64)
+		f.Add(
+			If(F64Ge(Get(x), F64c(9223372036854775808.0)), Return(c32(-1))),
+			If(F64Lt(Get(x), F64c(-9223372036854775808.0)), Return(c32(1))),
+			// x is in int64 range, so its integral part converts exactly.
+			Set(t, F64Trunc(Get(x))),
+			Set(ti, I64TruncSatF64S(get(t))),
+			If(I64LtS(Get(i), get(ti)), Return(c32(-1))),
+			If(I64GtS(Get(i), get(ti)), Return(c32(1))),
+			IfV(I32, F64Gt(Get(x), get(t)), c32(-1), IfV(I32, F64Lt(Get(x), get(t)), c32(1), c32(0))),
 		)
 	})
 
@@ -224,6 +316,8 @@ func (r *RT) registerNum() {
 				// NaN sorts above all other values and equals itself.
 				If(F64Ne(get(x), get(x)), Return(IfV(I32, F64Ne(get(y), get(y)), c32(0), c32(1)))),
 				If(F64Ne(get(y), get(y)), Return(c32(-1))),
+				If(eq(get(ta), c32(TInt)), Return(r.Call("cmp_int_float", i64v(get(a)), get(y)))),
+				If(eq(get(tb), c32(TInt)), Return(sub(c32(0), r.Call("cmp_int_float", i64v(get(b)), get(x))))),
 				Return(cmp3(F64Lt(get(x), get(y)), F64Gt(get(x), get(y)))),
 			}),
 			If(ne(get(ta), get(tb)), r.Call("cmp_error", get(a), get(b), get(opn))),
@@ -311,7 +405,7 @@ func (r *RT) registerNum() {
 			If(eq(get(t), c32(TInt)), Return(mix(I64Mul(i64v(get(v)), I64c(-7046029254386353131))))),
 			If(eq(get(t), c32(TFloat)), Seq{
 				Set(fl, f64v(get(v))),
-				If(and(F64Eq(F64Trunc(get(fl)), get(fl)), F64Lt(F64Abs(get(fl)), F64c(9.2e18))), Seq{
+				If(and(F64Eq(F64Trunc(get(fl)), get(fl)), and(F64Ge(get(fl), F64c(-9223372036854775808.0)), F64Lt(get(fl), F64c(9223372036854775808.0)))), Seq{
 					Set(x, I64TruncSatF64S(get(fl))),
 					Return(mix(I64Mul(get(x), I64c(-7046029254386353131)))),
 				}),

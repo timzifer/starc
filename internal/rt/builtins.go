@@ -105,6 +105,8 @@ func (r *RT) registerBuiltins() {
 			Set(sep, r.S(" ")),
 			If(get(kw), Seq{
 				Set(sep, r.Call("dict_get", get(kw), r.S("sep"))),
+				If(gt(ld(get(kw), offDictLen), Select(c32(1), c32(0), get(sep))),
+					r.Fail("print: unexpected keyword argument")),
 				If(eqz(get(sep)), Set(sep, r.S(" "))),
 				If(not(isTag(get(sep), TString)), r.Fail("print: sep must be a string")),
 			}),
@@ -151,25 +153,27 @@ func (r *RT) registerBuiltins() {
 			IfV(I32, eqz(nargs(args)), r.FalseV(), r.bool(r.Call("truth", arg(args, 0)))))
 	})
 	r.builtin("int", func(f *Func, args, kw Local) {
-		x, base, res := f.Local(I32), f.Local(I32), f.Local(I32)
+		x, base, hasBase, res := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
 		fl := f.Local(F64)
 		f.Add(
 			If(gt(nargs(args), c32(2)), r.Fail("int: got too many arguments")),
 			If(eqz(nargs(args)), Return(addr(r.Int(0)))),
 			Set(x, arg(args, 0)),
-			Set(base, c32(-1)),
-			If(eq(nargs(args), c32(2)), Set(base, r.Call("as_i32", arg(args, 1), r.S("int: base")))),
+			Set(base, c32(10)),
+			If(eq(nargs(args), c32(2)), Seq{Set(base, r.Call("as_i32", arg(args, 1), r.S("int: base"))), Set(hasBase, c32(1))}),
 			If(get(kw), Seq{
 				Set(res, r.Call("dict_get", get(kw), r.S("base"))),
-				If(get(res), Set(base, r.Call("as_i32", get(res), r.S("int: base")))),
+				If(get(res), Seq{Set(base, r.Call("as_i32", get(res), r.S("int: base"))), Set(hasBase, c32(1))}),
 			}),
 			If(isTag(get(x), TString), Seq{
-				Set(res, r.Call("parse_int", get(x), Select(c32(10), get(base), lt(get(base), c32(0))))),
+				If(and(ne(get(base), c32(0)), or(lt(get(base), c32(2)), gt(get(base), c32(36)))),
+					r.Fail("int: base must be an integer >= 2 && <= 36")),
+				Set(res, r.Call("parse_int", get(x), get(base))),
 				If(eqz(get(res)), r.Fail("int: invalid literal with base ",
-					r.Call("i64_to_str", I64ExtendI32S(Select(c32(10), get(base), lt(get(base), c32(0))))), ": ", r.Call("quote", get(x)))),
+					r.Call("i64_to_str", I64ExtendI32S(get(base))), ": ", r.Call("quote", get(x)))),
 				Return(get(res)),
 			}),
-			If(ge(get(base), c32(0)), r.Fail("int: can't convert non-string with explicit base")),
+			If(get(hasBase), r.Fail("int: can't convert non-string with explicit base")),
 			If(isTag(get(x), TInt), Return(get(x))),
 			If(isTag(get(x), TBool), Return(r.Call("int", I64ExtendI32U(ld(get(x), offBool))))),
 			If(isTag(get(x), TFloat), Seq{

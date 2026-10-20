@@ -237,8 +237,12 @@ func (r *RT) registerStr() {
 			If(eq(get(t), c32(TInt)), Return(r.Call("i64_to_str", i64v(get(v))))),
 			If(eq(get(t), c32(TFloat)), Return(r.Call("f64_to_str", f64v(get(v))))),
 			If(eq(get(t), c32(TString)), Return(r.Call("quote", get(v)))),
+			// A list or dict that is already being printed contains itself.
+			If(and(eq(get(t), c32(TList)), ne(and(I32Load8U(get(v), offFlags), c32(flagRepr)), c32(0))), Return(r.S("[...]"))),
+			If(and(eq(get(t), c32(TDict)), ne(and(I32Load8U(get(v), offFlags), c32(flagRepr)), c32(0))), Return(r.S("{...}"))),
 			Set(parts, r.Call("list_new", c32(8))),
 			If(or(eq(get(t), c32(TList)), eq(get(t), c32(TTuple))), Seq{
+				If(eq(get(t), c32(TList)), I32Store8(get(v), offFlags, or(I32Load8U(get(v), offFlags), c32(flagRepr)))),
 				push(IfV(I32, eq(get(t), c32(TList)), r.S("["), r.S("("))),
 				Set(n, ld(get(v), 4)),
 				Set(base, r.Call("seq_base", get(v))),
@@ -248,9 +252,11 @@ func (r *RT) registerStr() {
 				),
 				If(and(eq(get(t), c32(TTuple)), eq(get(n), c32(1))), push(r.S(","))),
 				push(IfV(I32, eq(get(t), c32(TList)), r.S("]"), r.S(")"))),
+				If(eq(get(t), c32(TList)), I32Store8(get(v), offFlags, and(I32Load8U(get(v), offFlags), c32(^flagRepr)))),
 				Return(r.Call("str_join", r.S(""), get(parts))),
 			}),
 			If(eq(get(t), c32(TDict)), Seq{
+				I32Store8(get(v), offFlags, or(I32Load8U(get(v), offFlags), c32(flagRepr))),
 				push(r.S("{")),
 				forRange(i, c32(0), ld(get(v), offDictUsed),
 					Set(ent, add(ld(get(v), offDictEntries), mul(get(i), c32(12)))),
@@ -263,6 +269,7 @@ func (r *RT) registerStr() {
 					}),
 				),
 				push(r.S("}")),
+				I32Store8(get(v), offFlags, and(I32Load8U(get(v), offFlags), c32(^flagRepr))),
 				Return(r.Call("str_join", r.S(""), get(parts))),
 			}),
 			If(eq(get(t), c32(TFunction)),
@@ -274,7 +281,7 @@ func (r *RT) registerStr() {
 					r.TypeName(ld(get(v), offBoundRecv)), " value>"))),
 			If(eq(get(t), c32(TRange)), Seq{
 				push(r.S("range(")),
-				If(I64Ne(I64Load(get(v), offRangeStart), I64c(0)), Seq{
+				If(or(I64Ne(I64Load(get(v), offRangeStart), I64c(0)), I64Ne(I64Load(get(v), offRangeStep), I64c(1))), Seq{
 					push(r.Call("i64_to_str", I64Load(get(v), offRangeStart))),
 					push(r.S(", ")),
 				}),
@@ -311,8 +318,10 @@ func (r *RT) registerStr() {
 		})
 	}
 
-	// parse_int(s, base) -> int object, or 0 if invalid. Accepts sign,
-	// surrounding whitespace is not permitted (matching Starlark's int()).
+	// parse_int(s, base) -> int object, or 0 if invalid. Accepts a sign
+	// and a base prefix; surrounding whitespace and underscores are not
+	// permitted (matching Starlark's int()). Base 0 infers the base from
+	// the prefix.
 	r.define("parse_int", p2, r1, func(f *Func) {
 		s, base := f.Param(0), f.Param(1)
 		i, n, c, d, neg := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
@@ -334,19 +343,30 @@ func (r *RT) registerStr() {
 					If(and(eq(get(c), c32('b')), or(eq(get(base), c32(2)), eqz(get(base)))), Seq{Set(base, c32(2)), Set(i, add(get(i), c32(2)))}),
 				}),
 			}),
-			If(eqz(get(base)), Set(base, c32(10))),
+			If(eqz(get(base)), Seq{
+				// Without a prefix, a literal starting with zero must be all
+				// zeros, so int("0755", 0) is rejected.
+				If(and(lt(add(get(i), c32(1)), get(n)), eq(I32Load8U(add(sbytes(get(s)), get(i)), 0), c32('0'))), Seq{
+					forRange(i, add(get(i), c32(1)), get(n),
+						If(ne(I32Load8U(add(sbytes(get(s)), get(i)), 0), c32('0')), Return(c32(0)))),
+					Return(r.Call("int", I64c(0))),
+				}),
+				Set(base, c32(10)),
+			}),
 			If(ge(get(i), get(n)), Return(c32(0))),
 			forRange(i, get(i), get(n),
 				Set(c, I32Load8U(add(sbytes(get(s)), get(i)), 0)),
 				Set(d, IfV(I32, and(ge(get(c), c32('0')), le(get(c), c32('9'))), sub(get(c), c32('0')),
 					IfV(I32, and(ge(I32Or(get(c), c32(0x20)), c32('a')), le(I32Or(get(c), c32(0x20)), c32('z'))),
 						add(sub(I32Or(get(c), c32(0x20)), c32('a')), c32(10)), c32(99)))),
-				If(eq(get(c), c32('_')), Set(d, c32(-1))),
 				If(ge(get(d), get(base)), Return(c32(0))),
-				If(ge(get(d), c32(0)),
-					Set(acc, r.Call("iadd", r.Call("imul", get(acc), I64ExtendI32S(get(base))), I64ExtendI32S(get(d))))),
+				// Negative values are accumulated negatively, so that the
+				// most negative int64 can be parsed.
+				Set(acc, r.Call("imul", get(acc), I64ExtendI32S(get(base)))),
+				Set(acc, IfV(I64, get(neg), r.Call("isub", get(acc), I64ExtendI32S(get(d))),
+					r.Call("iadd", get(acc), I64ExtendI32S(get(d))))),
 			),
-			r.Call("int", IfV(I64, get(neg), I64Sub(I64c(0), get(acc)), get(acc))),
+			r.Call("int", get(acc)),
 		)
 	})
 }

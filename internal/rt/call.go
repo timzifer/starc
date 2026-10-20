@@ -76,8 +76,10 @@ func (r *RT) registerCall() {
 			Set(npos, sub(get(named), ld(get(spec), offSpecKwonly))),
 			Set(nargs, ld(get(args), offTupLen)),
 			Set(names, ld(get(spec), offSpecNames)),
-			// fast path: exact positional call
-			If(and(and(eqz(get(kw)), eq(get(nargs), get(named))), eqz(and(get(flags), c32(SpecVarargs|SpecKwargs)))),
+			// fast path: exact positional call of a function without
+			// keyword-only parameters
+			If(and(and(eqz(get(kw)), and(eq(get(nargs), get(named)), eq(get(npos), get(named)))),
+				eqz(and(get(flags), c32(SpecVarargs|SpecKwargs)))),
 				Return(add(get(args), c32(offTupElems)))),
 			Set(nslots, add(add(get(named), and(get(flags), c32(SpecVarargs))), I32ShrU(and(get(flags), c32(SpecKwargs)), c32(1)))),
 			Set(slots, r.Call("alloc", I32Shl(add(get(nslots), c32(1)), c32(2)))),

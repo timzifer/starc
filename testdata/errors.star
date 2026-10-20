@@ -55,3 +55,39 @@ int("12x")
 sorted([1, "a"])
 ---
 "%d" % "x"
+---
+print([1, 2][::4294967296])
+---
+print([1, 2][2147483648:])
+---
+def f(a, *, b):
+    return a + b
+
+print(f(1, 2))
+---
+def f(a, *, b = 1):
+    return a + b
+
+print(f(1, 2))
+---
+print(int("_1"))
+---
+print(int("1_"))
+---
+print(int("__"))
+---
+print(int("1__2"))
+---
+print(int("1_000"))
+---
+print(int("9", base = 37))
+---
+print(int("1", 1))
+---
+print(int("0755", 0))
+---
+print(int("0x", 0))
+---
+print("x", invalid = True)
+---
+print("x", sep = "-", end = "")
