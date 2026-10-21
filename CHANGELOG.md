@@ -52,6 +52,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 * `host.Load` releases the compiled module once it is instantiated.
+* Repeating an empty string, list or tuple (`"" * 3`) no longer traps
+  with an integer division by zero.
 
 ## [0.1.1] - 2026-10-20
 

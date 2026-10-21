@@ -1,0 +1,53 @@
+name: Fuzz
+
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: Fuzzing time per target
+        default: 10m
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { pkg: ./abi, target: FuzzDecode }
+          - { pkg: ./abi, target: FuzzDecodeCall }
+          - { pkg: ./internal/compiler, target: FuzzCompile }
+          - { pkg: ./internal/compiler, target: FuzzPrograms }
+          - { pkg: ./internal/compiler, target: FuzzStrings }
+          - { pkg: ./internal/compiler, target: FuzzNumbers }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - name: Locate corpus
+        id: corpus
+        run: echo "dir=$(go env GOCACHE)/fuzz" >> "$GITHUB_OUTPUT"
+      # Keep the generated corpus across runs, so each run continues where
+      # the last one stopped.
+      - uses: actions/cache@v6
+        with:
+          path: ${{ steps.corpus.outputs.dir }}
+          key: fuzz-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-${{ matrix.target }}-
+      - name: Fuzz
+        env:
+          FUZZTIME: ${{ inputs.fuzztime || '10m' }}
+        run: go test -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime "$FUZZTIME" ${{ matrix.pkg }}
+      - name: Upload failing input
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: ${{ matrix.pkg }}/testdata/fuzz

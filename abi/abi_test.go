@@ -1,6 +1,7 @@
 package abi
 
 import (
+	"bytes"
 	"errors"
 	"math"
 	"reflect"
@@ -142,4 +143,55 @@ func TestDecodeDepth(t *testing.T) {
 	if _, err := Decode(nested(MaxDepth + 1)); err == nil || !strings.Contains(err.Error(), "nested") {
 		t.Errorf("depth %d: err = %v", MaxDepth+1, err)
 	}
+}
+
+// FuzzDecode checks that decoding arbitrary bytes never panics and that
+// every value it accepts encodes back to exactly the same bytes.
+func FuzzDecode(f *testing.F) {
+	for _, v := range []any{
+		nil, true, int64(math.MinInt64), math.NaN(), "héllo",
+		[]any{int64(1), "a", Tuple{nil, false}},
+		NewDict("k", []any{2.5}, int64(2), NewDict(), Tuple{}, "v"),
+	} {
+		b, err := Encode(v)
+		if err != nil {
+			f.Fatal(err)
+		}
+		f.Add(b)
+	}
+	f.Add([]byte{TagList, 0xff, 0xff, 0xff, 0xff})
+	f.Add([]byte{TagDict, 1, 0, 0, 0, TagList, 1, 0, 0, 0, TagStr, 0, 0, 0, 0})
+	f.Fuzz(func(t *testing.T, b []byte) {
+		v, err := Decode(b)
+		if err != nil {
+			return
+		}
+		got, err := Encode(v)
+		if err != nil {
+			t.Fatalf("Encode(Decode(%x)): %v", b, err)
+		}
+		if !bytes.Equal(got, b) {
+			t.Fatalf("Encode(Decode(%x)) = %x", b, got)
+		}
+	})
+}
+
+// FuzzDecodeCall is like FuzzDecode for encoded call arguments.
+func FuzzDecodeCall(f *testing.F) {
+	f.Add(must(EncodeCall([]any{int64(1), "x"}, NewDict("k", true))))
+	f.Add(must(EncodeCall(nil, nil)))
+	f.Add(append(must(Encode(Tuple{})), must(Encode(NewDict()))...))
+	f.Fuzz(func(t *testing.T, b []byte) {
+		args, kwargs, err := DecodeCall(b)
+		if err != nil || kwargs != nil && kwargs.Len() == 0 {
+			return // EncodeCall omits empty keyword arguments
+		}
+		got, err := EncodeCall(args, kwargs)
+		if err != nil {
+			t.Fatalf("EncodeCall(DecodeCall(%x)): %v", b, err)
+		}
+		if !bytes.Equal(got, b) {
+			t.Fatalf("EncodeCall(DecodeCall(%x)) = %x", b, got)
+		}
+	})
 }

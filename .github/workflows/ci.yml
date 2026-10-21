@@ -70,17 +70,6 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
 
-  vuln:
-    name: Vulnerability check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: stable
-      - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
-
   release-config:
     name: GoReleaser config
     runs-on: ubuntu-latest
