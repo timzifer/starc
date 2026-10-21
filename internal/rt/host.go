@@ -105,12 +105,14 @@ func (r *RT) registerHost() {
 		)
 	})
 	// call_method(fn, args, kw): a method call whose receiver args[0] may
-	// be a module; module members are called without the receiver.
+	// be a module or a struct, whose members are called without the
+	// receiver.
 	r.define("call_method", p3, r1, func(f *Func) {
 		fn, args, kw := f.Param(0), f.Param(1), f.Param(2)
 		t := f.Local(I32)
 		f.Add(
-			If(isTag(ld(get(args), offTupElems), TModule), Seq{
+			Set(t, tagOf(ld(get(args), offTupElems))),
+			If(or(eq(get(t), c32(TModule)), eq(get(t), c32(TStruct))), Seq{
 				Set(t, r.Call("tuple_new", sub(ld(get(args), offTupLen), c32(1)))),
 				r.memcopy(add(get(t), c32(offTupElems)), add(get(args), c32(offTupElems+4)),
 					I32Shl(ld(get(t), offTupLen), c32(2))),

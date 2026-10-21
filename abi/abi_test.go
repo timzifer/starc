@@ -195,3 +195,49 @@ func FuzzDecodeCall(f *testing.F) {
 		}
 	})
 }
+
+func TestStructOpaque(t *testing.T) {
+	s := NewStruct("b", int64(2), "a", []any{"x"})
+	if s.Fields[0].Name != "a" {
+		t.Errorf("fields not sorted: %#v", s.Fields)
+	}
+	if v, ok := s.Get("b"); !ok || v != int64(2) {
+		t.Errorf("Get(b) = %v, %v", v, ok)
+	}
+	if _, ok := s.Get("c"); ok {
+		t.Error("Get(c) found")
+	}
+	o := &Opaque{Type: "action", Repr: "action(go)", Payload: []byte{1, 2}, Falsy: true, Unhashable: true}
+	for _, v := range []any{s, o, NewStruct(), &Opaque{}, Tuple{s, o}} {
+		b, err := Encode(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := Decode(b)
+		if err != nil {
+			t.Fatalf("Decode(%#v): %v", v, err)
+		}
+		want := v
+		if o, ok := v.(*Opaque); ok && o.Payload == nil {
+			want = &Opaque{Payload: []byte{}}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("round trip: got %#v, want %#v", got, want)
+		}
+	}
+	// Encoding sorts nothing, decoding sorts and rejects duplicates.
+	b := must(Encode(&Struct{Fields: []Field{{"z", nil}, {"a", true}}}))
+	if got, _ := Decode(b); !reflect.DeepEqual(got, NewStruct("a", true, "z", nil)) {
+		t.Errorf("unsorted struct decoded as %#v", got)
+	}
+	if _, err := Decode(must(Encode(&Struct{Fields: []Field{{"a", nil}, {"a", nil}}}))); err == nil {
+		t.Error("duplicate field accepted")
+	}
+	for _, bad := range [][]byte{
+		{TagOpaque}, {TagOpaque, 0, 5, 0, 0, 0, 'x'}, {TagStruct, 1, 0, 0, 0}, {TagStruct, 1, 0, 0, 0, 1, 0, 0, 0, 'a'},
+	} {
+		if _, err := Decode(bad); err == nil {
+			t.Errorf("Decode(%v) succeeded", bad)
+		}
+	}
+}

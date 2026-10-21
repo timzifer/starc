@@ -336,6 +336,7 @@ func (r *RT) registerNum() {
 				Return(cmp3(F64Lt(get(x), get(y)), F64Gt(get(x), get(y)))),
 			}),
 			If(ne(get(ta), get(tb)), r.Call("cmp_error", get(a), get(b), get(opn))),
+			If(eq(get(ta), c32(TSet)), Return(r.Call("set_cmp", get(a), get(b), get(opn)))),
 			If(eq(get(ta), c32(TString)), Return(r.Call("str_cmp", get(a), get(b)))),
 			If(eq(get(ta), c32(TBool)),
 				Return(sub(ld(get(a), offBool), ld(get(b), offBool)))),
@@ -390,7 +391,7 @@ func (r *RT) registerNum() {
 			If(ne(get(ta), get(tb)), Return(c32(0))),
 			// Containers are compared element-wise even if identical, so that
 			// cyclic values hit the depth limit as in Starlark.
-			If(and(eq(get(a), get(b)), not(or(or(eq(get(ta), c32(TList)), eq(get(ta), c32(TTuple))), eq(get(ta), c32(TDict))))),
+			If(and(eq(get(a), get(b)), not(or(or(eq(get(ta), c32(TList)), eq(get(ta), c32(TTuple))), or(eq(get(ta), c32(TDict)), eq(get(ta), c32(TStruct)))))),
 				Return(c32(1))),
 			If(eq(get(ta), c32(TString)), Return(r.Call("str_eq", get(a), get(b)))),
 			If(eq(get(ta), c32(TBool)), Return(eq(ld(get(a), offBool), ld(get(b), offBool)))),
@@ -406,6 +407,22 @@ func (r *RT) registerNum() {
 				r.Call("cmp_leave"),
 				Return(c32(1)),
 			}),
+			If(eq(get(ta), c32(TOpaque)), Return(and(r.Call("str_eq", ld(get(a), offOpqType), ld(get(b), offOpqType)),
+				r.Call("str_eq", ld(get(a), offOpqPayload), ld(get(b), offOpqPayload))))),
+			If(eq(get(ta), c32(TStruct)), Seq{
+				Set(n, ld(get(a), offStructLen)),
+				If(ne(get(n), ld(get(b), offStructLen)), Return(c32(0))),
+				Set(pa, ld(get(a), offStructFields)), Set(pb, ld(get(b), offStructFields)),
+				r.forRange(i, c32(0), get(n),
+					If(not(r.Call("str_eq", ld(add(get(pa), I32Shl(get(i), c32(3))), 0), ld(add(get(pb), I32Shl(get(i), c32(3))), 0))), Return(c32(0))),
+					r.Call("cmp_enter"),
+					Set(v, r.Call("eq", ld(add(get(pa), I32Shl(get(i), c32(3))), 4), ld(add(get(pb), I32Shl(get(i), c32(3))), 4))),
+					r.Call("cmp_leave"),
+					If(eqz(get(v)), Return(c32(0)))),
+				Return(c32(1)),
+			}),
+			If(eq(get(ta), c32(TSet)), Return(and(eq(ld(get(a), offDictLen), ld(get(b), offDictLen)),
+				r.Call("set_subset", get(a), get(b))))),
 			If(eq(get(ta), c32(TDict)), Seq{
 				If(ne(ld(get(a), offDictLen), ld(get(b), offDictLen)), Return(c32(0))),
 				If(eqz(ld(get(a), offDictLen)), Return(c32(1))),
@@ -460,6 +477,17 @@ func (r *RT) registerNum() {
 				Return(mix(I64Mul(I64ReinterpF64(get(fl)), I64c(-7046029254386353131)))),
 			}),
 			If(eq(get(t), c32(TNone)), Return(c32(0x1f2e3d4c))),
+			If(eq(get(t), c32(TOpaque)), Seq{
+				If(and(ld(get(v), offOpqFlags), c32(OpaqueUnhashable)), r.Fail("unhashable type: ", r.TypeName(get(v)))),
+				Return(add(mul(r.Call("str_hash", ld(get(v), offOpqType)), c32(31)), r.Call("str_hash", ld(get(v), offOpqPayload)))),
+			}),
+			If(eq(get(t), c32(TStruct)), Seq{
+				Set(h, c32(0x5bd1e995)),
+				r.forRange(i, c32(0), ld(get(v), offStructLen),
+					Set(h, add(mul(I32Xor(get(h), r.Call("str_hash", ld(add(ld(get(v), offStructFields), I32Shl(get(i), c32(3))), 0))), c32(1000003)),
+						r.Call("hash", ld(add(ld(get(v), offStructFields), I32Shl(get(i), c32(3))), 4))))),
+				Return(get(h)),
+			}),
 			If(eq(get(t), c32(TBool)), Return(add(ld(get(v), offBool), c32(0x5a5a)))),
 			If(eq(get(t), c32(TTuple)), Seq{
 				Set(h, c32(0x345678)),
@@ -467,7 +495,7 @@ func (r *RT) registerNum() {
 					Set(h, add(mul(I32Xor(get(h), r.Call("hash", ld(elem(get(v), offTupElems, get(i)), 0))), c32(1000003)), get(i)))),
 				Return(get(h)),
 			}),
-			If(or(or(eq(get(t), c32(TList)), eq(get(t), c32(TDict))), or(eq(get(t), c32(TRange)), eq(get(t), c32(TModule)))),
+			If(or(or(eq(get(t), c32(TList)), eq(get(t), c32(TDict))), or(or(eq(get(t), c32(TRange)), eq(get(t), c32(TModule))), eq(get(t), c32(TSet)))),
 				r.Fail("unhashable type: ", r.TypeName(get(v)))),
 			mul(get(v), c32(-1640531535)),
 		)
@@ -501,7 +529,7 @@ func (r *RT) defineArith(name, opname string) {
 				If(and(eq(get(ta), c32(TTuple)), eq(get(tb), c32(TTuple))), Return(r.Call("tuple_concat", get(a), get(b)))),
 			)
 		case OpSub:
-			f.Add(intRes(r.Call("isub", ia, ib)), floatRes(F64Sub(get(x), get(y))))
+			f.Add(intRes(r.Call("isub", ia, ib)), floatRes(F64Sub(get(x), get(y))), r.setOp(ta, tb, a, b, 2))
 		case OpMul:
 			f.Add(
 				intRes(r.Call("imul", ia, ib)),
@@ -533,14 +561,15 @@ func (r *RT) defineArith(name, opname string) {
 				If(eq(get(ta), c32(TString)), Return(r.hook("percent_format", get(a), get(b)))),
 			)
 		case OpAnd:
-			f.Add(intRes(I64And(ia, ib)))
+			f.Add(intRes(I64And(ia, ib)), r.setOp(ta, tb, a, b, 1))
 		case OpOr:
 			f.Add(
 				intRes(I64Or(ia, ib)),
 				If(and(eq(get(ta), c32(TDict)), eq(get(tb), c32(TDict))), Return(r.Call("dict_union", get(a), get(b)))),
+				r.setOp(ta, tb, a, b, 0),
 			)
 		case OpXor:
-			f.Add(intRes(I64Xor(ia, ib)))
+			f.Add(intRes(I64Xor(ia, ib)), r.setOp(ta, tb, a, b, 3))
 		case OpShl, OpShr:
 			s := f.Local(I64)
 			res := f.Local(I64)

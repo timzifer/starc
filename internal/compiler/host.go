@@ -133,6 +133,13 @@ func (c *compiler) hostRef(e syntax.Expr) (n *hostNode, ok bool) {
 	return nil, false
 }
 
+// structsPossible reports whether the program may see struct values:
+// from the struct builtin, or from the host through arguments and the
+// results of host functions.
+func (c *compiler) structsPossible() bool {
+	return c.opts.Struct || !c.opts.Command || len(c.r.HostFuncs()) > 0
+}
+
 // hostExpr yields the value of a resolved host reference.
 func (c *compiler) hostExpr(n *hostNode) Expr {
 	if n == nil {

@@ -97,6 +97,7 @@ type buildOpts struct {
 	noWASI  bool
 	fuel    bool
 	finite  bool
+	structs bool
 	budget  int64
 	limits  struct {
 		pages, input, result uint
@@ -122,10 +123,12 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 	fs.UintVar(&o.limits.input, "max-input", 0, "maximum size of the encoded arguments of a call in bytes (default unlimited)")
 	fs.UintVar(&o.limits.result, "max-result", 0, "maximum size of the encoded result of a call in bytes (default unlimited)")
 	fs.BoolVar(&o.finite, "finite-floats", false, "make NaN and infinite floats errors")
+	fs.BoolVar(&o.structs, "struct", false, "provide the struct builtin")
 	fs.BoolVar(&o.dialect.While, "while", false, "allow while loops")
 	fs.BoolVar(&o.dialect.TopLevelControl, "toplevel-control", false, "allow if/for/while at top level")
 	fs.BoolVar(&o.dialect.GlobalReassign, "global-reassign", false, "allow reassignment of top-level names")
 	fs.BoolVar(&o.dialect.Recursion, "recursion", false, "allow recursive functions")
+	fs.BoolVar(&o.dialect.Set, "set", false, "provide the set type")
 	fs.Usage = func() {
 		fmt.Fprint(stderr, usage)
 		fs.PrintDefaults()
@@ -134,7 +137,7 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 }
 
 func (o *buildOpts) options() *starc.Options {
-	opts := &starc.Options{NoNames: o.noNames, NoWASI: o.noWASI, Fuel: o.fuel || o.budget > 0, FiniteFloats: o.finite, Dialect: o.dialect,
+	opts := &starc.Options{NoNames: o.noNames, NoWASI: o.noWASI, Fuel: o.fuel || o.budget > 0, FiniteFloats: o.finite, Struct: o.structs, Dialect: o.dialect,
 		MaxMemoryPages: uint32(min(o.limits.pages, 1<<32-1)), MaxCallDepth: o.limits.depth,
 		MaxInputBytes: uint32(min(o.limits.input, 1<<32-1)), MaxResultBytes: uint32(min(o.limits.result, 1<<32-1))}
 	if o.command {
@@ -345,6 +348,14 @@ func toJSON(v any) any {
 	switch v := v.(type) {
 	case abi.Tuple:
 		return toJSON([]any(v))
+	case *abi.Struct:
+		obj := make(map[string]any, len(v.Fields))
+		for _, f := range v.Fields {
+			obj[f.Name] = toJSON(f.Value)
+		}
+		return obj
+	case *abi.Opaque:
+		return v.Repr
 	case []any:
 		out := make([]any, len(v))
 		for i, x := range v {

@@ -31,7 +31,10 @@ const (
 	TRange    = 11
 	TBound    = 12
 	TModule   = 13
-	NumTags   = 14
+	TSet      = 14
+	TStruct   = 15
+	TOpaque   = 16
+	NumTags   = 17
 )
 
 // Object layouts (byte offsets).
@@ -260,6 +263,9 @@ func New(m *Module, cfg Config) *RT {
 	r.registerBuiltins()
 	r.registerABI()
 	r.registerHost()
+	r.registerSet()
+	r.registerStruct()
+	r.registerOpaque()
 	return r
 }
 
@@ -620,8 +626,9 @@ func (r *RT) registerCore() {
 	r.define("type_name", p1, r1, func(f *Func) {
 		v := f.Param(0)
 		names := []string{"NoneType", "bool", "int", "float", "string", "tuple", "list", "dict",
-			"function", "builtin_function_or_method", "cell", "range", "builtin_function_or_method", "module"}
-		body := r.S("unknown")
+			"function", "builtin_function_or_method", "cell", "range", "builtin_function_or_method", "module", "set", "struct"}
+		// An opaque value names its own type.
+		body := IfV(I32, isTag(get(v), TOpaque), ld(get(v), offOpqType), r.S("unknown"))
 		for t := len(names) - 1; t >= 0; t-- {
 			body = IfV(I32, isTag(get(v), t), r.S(names[t]), body)
 		}
@@ -638,9 +645,10 @@ func (r *RT) registerCore() {
 			If(eq(get(t), c32(TBool)), Return(ld(get(v), offBool))),
 			If(eq(get(t), c32(TInt)), Return(I64Ne(I64Load(get(v), offInt), I64c(0)))),
 			If(eq(get(t), c32(TFloat)), Return(F64Ne(F64Load(get(v), offFloat), F64c(0)))),
-			If(or(or(eq(get(t), c32(TString)), eq(get(t), c32(TTuple))), or(eq(get(t), c32(TList)), eq(get(t), c32(TDict)))),
+			If(or(or(or(eq(get(t), c32(TString)), eq(get(t), c32(TTuple))), or(eq(get(t), c32(TList)), eq(get(t), c32(TDict)))), eq(get(t), c32(TSet))),
 				Return(ne(ld(get(v), 4), c32(0)))),
 			If(eq(get(t), c32(TRange)), Return(I64Ne(r.Call("range_len", get(v)), I64c(0)))),
+			If(eq(get(t), c32(TOpaque)), Return(eqz(and(ld(get(v), offOpqFlags), c32(OpaqueFalsy))))),
 			c32(1),
 		)
 	})
@@ -685,7 +693,7 @@ func (r *RT) registerCore() {
 			If(eq(get(t), c32(TList)),
 				r.forRange(i, c32(0), ld(get(v), offListLen),
 					r.Call("freeze", ld(elem(ld(get(v), offListData), 0, get(i)), 0)))),
-			If(eq(get(t), c32(TDict)), Seq{
+			If(or(eq(get(t), c32(TDict)), eq(get(t), c32(TSet))), Seq{
 				Set(n, ld(get(v), offDictUsed)),
 				r.forRange(i, c32(0), get(n),
 					r.Call("freeze", ld(add(ld(get(v), offDictEntries), mul(get(i), c32(12))), 4)),
@@ -698,6 +706,9 @@ func (r *RT) registerCore() {
 			}),
 			If(eq(get(t), c32(TCell)), r.Call("freeze", ld(get(v), offCellVal))),
 			If(eq(get(t), c32(TBound)), r.Call("freeze", ld(get(v), offBoundRecv))),
+			If(eq(get(t), c32(TStruct)),
+				r.forRange(i, c32(0), ld(get(v), offStructLen),
+					r.Call("freeze", ld(add(ld(get(v), offStructFields), I32Shl(get(i), c32(3))), 4)))),
 		)
 	})
 }

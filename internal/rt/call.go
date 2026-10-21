@@ -135,6 +135,8 @@ func (r *RT) registerCall() {
 	r.define("method_lookup", p2, r1, func(f *Func) {
 		f.Add(Raw(func() Expr {
 			lookup := ld(add(addr(r.methodTable), I32Shl(add(mul(tagOf(get(f.Param(0))), c32(len(r.methodNames))), get(f.Param(1))), c32(2))), 0)
+			lookup = IfV(I32, isTag(get(f.Param(0)), TStruct),
+				r.Call("struct_get", get(f.Param(0)), r.Call("method_name", get(f.Param(1)))), lookup)
 			if !r.modules {
 				return lookup
 			}
@@ -164,7 +166,7 @@ func (r *RT) registerCall() {
 		m := f.Local(I32)
 		f.Add(
 			Set(m, r.Call("method_lookup", get(recv), get(id))),
-			If(eqz(get(m)), r.Fail(r.TypeName(get(recv)), " has no .", r.Call("method_name", get(id)), " field or method")),
+			If(eqz(get(m)), r.Call("no_field", get(recv), r.Call("method_name", get(id)))),
 			get(m),
 		)
 	})
@@ -174,13 +176,8 @@ func (r *RT) registerCall() {
 		m, b := f.Local(I32), f.Local(I32)
 		f.Add(
 			Set(m, r.Call("method_lookup", get(x), get(id))),
-			If(eqz(get(m)), r.Fail(r.TypeName(get(x)), " has no .", r.Call("method_name", get(id)), " field or method")),
-			Raw(func() Expr {
-				if !r.modules {
-					return Nop()
-				}
-				return If(isTag(get(x), TModule), Return(get(m)))
-			}),
+			If(eqz(get(m)), r.Call("no_field", get(x), r.Call("method_name", get(id)))),
+			If(r.HasFields(get(x)), Return(get(m))),
 			Set(b, r.Call("alloc", c32(12))),
 			st(get(b), 0, c32(TBound)),
 			st(get(b), offBoundFn, get(m)),

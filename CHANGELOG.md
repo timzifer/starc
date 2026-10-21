@@ -8,6 +8,15 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+* The `set` type with `Dialect.Set` (`-set`), as in go.starlark.net:
+  `set()`, its methods, the operators `| & - ^` and subset comparisons.
+* Structs as in `starlarkstruct`: attribute access, `getattr`,
+  `hasattr`, `dir`, equality and hashing. The host exchanges them as
+  `abi.Struct` (ABI tag 9); `Options.Struct` (`-struct`) provides the
+  builtin `struct(**kwargs)`.
+* Opaque host values (`abi.Opaque`, ABI tag 10) with a host-defined type
+  name, string form, truth and hashability, for custom types such as
+  actions.
 * `Options.FiniteFloats` (`-finite-floats`) makes creating NaN or an
   infinity a Starlark error (`non-finite float value`).
 * Hard limits: `Options.MaxMemoryPages` (`-max-pages`, default 65535)
@@ -63,6 +72,9 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+* Containers with more than 2^28 elements fail with `out of memory`
+  instead of wrapping their size computation, for example when decoding
+  a huge encoded list.
 * NaN is canonicalized to `0x7ff8000000000000` wherever a float is
   created, so NaN values hash, compare and encode identically on every
   platform, whichever operation produced them.

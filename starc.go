@@ -43,6 +43,7 @@ type Dialect struct {
 	TopLevelControl bool // allow if/for/while at top level
 	GlobalReassign  bool // allow reassignment of top-level names
 	Recursion       bool // allow recursive function calls
+	Set             bool // provide the set type and the set builtin
 }
 
 // Options configures compilation. The zero value is a reactor module
@@ -91,6 +92,10 @@ type Options struct {
 	// it, NaN is always canonicalized to a single bit pattern (see
 	// docs/language.md).
 	FiniteFloats bool
+	// Struct provides the builtin struct(**kwargs), as embedders of
+	// go.starlark.net usually predeclare it (starlarkstruct.Make). Struct
+	// values from the host are available without it.
+	Struct bool
 }
 
 // maxCallDepth bounds Options.MaxCallDepth; no engine supports deeper
@@ -182,11 +187,13 @@ func Compile(filename string, src []byte, opts *Options) ([]byte, error) {
 		MaxInputBytes:  opts.MaxInputBytes,
 		MaxResultBytes: opts.MaxResultBytes,
 		FiniteFloats:   opts.FiniteFloats,
+		Struct:         opts.Struct,
 		Dialect: syntax.FileOptions{
 			While:           opts.Dialect.While,
 			TopLevelControl: opts.Dialect.TopLevelControl,
 			GlobalReassign:  opts.Dialect.GlobalReassign,
 			Recursion:       opts.Dialect.Recursion,
+			Set:             opts.Dialect.Set,
 		},
 	})
 	var el compiler.ErrorList

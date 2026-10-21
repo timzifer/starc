@@ -9,7 +9,7 @@ import (
 
 // methodPrefixes maps prelude name prefixes to the type whose methods
 // they implement.
-var methodPrefixes = []string{"_str_", "_list_", "_dict_"}
+var methodPrefixes = []string{"_str_", "_list_", "_dict_", "_set_"}
 
 // reach computes which prelude definitions and primitive methods the
 // program can use, so that unused library code is not compiled.
