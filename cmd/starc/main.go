@@ -98,6 +98,7 @@ type buildOpts struct {
 	fuel    bool
 	finite  bool
 	structs bool
+	noBT    bool
 	budget  int64
 	limits  struct {
 		pages, input, result uint
@@ -124,6 +125,7 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 	fs.UintVar(&o.limits.result, "max-result", 0, "maximum size of the encoded result of a call in bytes (default unlimited)")
 	fs.BoolVar(&o.finite, "finite-floats", false, "make NaN and infinite floats errors")
 	fs.BoolVar(&o.structs, "struct", false, "provide the struct builtin")
+	fs.BoolVar(&o.noBT, "no-backtrace", false, "omit source positions and call stacks of run-time errors")
 	fs.BoolVar(&o.dialect.While, "while", false, "allow while loops")
 	fs.BoolVar(&o.dialect.TopLevelControl, "toplevel-control", false, "allow if/for/while at top level")
 	fs.BoolVar(&o.dialect.GlobalReassign, "global-reassign", false, "allow reassignment of top-level names")
@@ -138,7 +140,7 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 
 func (o *buildOpts) options() *starc.Options {
 	opts := &starc.Options{NoNames: o.noNames, NoWASI: o.noWASI, Fuel: o.fuel || o.budget > 0, FiniteFloats: o.finite, Struct: o.structs, Dialect: o.dialect,
-		MaxMemoryPages: uint32(min(o.limits.pages, 1<<32-1)), MaxCallDepth: o.limits.depth,
+		NoBacktrace: o.noBT, MaxMemoryPages: uint32(min(o.limits.pages, 1<<32-1)), MaxCallDepth: o.limits.depth,
 		MaxInputBytes: uint32(min(o.limits.input, 1<<32-1)), MaxResultBytes: uint32(min(o.limits.result, 1<<32-1))}
 	if o.command {
 		opts.ExecModel = starc.Command
@@ -181,6 +183,12 @@ func report(stderr io.Writer, err error) int {
 		for _, e := range el {
 			fmt.Fprintln(stderr, e)
 		}
+		return 1
+	}
+	// A Starlark error is reported as by a command module.
+	var se *host.Error
+	if errors.As(err, &se) {
+		fmt.Fprintln(stderr, se.Backtrace())
 		return 1
 	}
 	fmt.Fprintln(stderr, "starc:", err)

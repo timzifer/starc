@@ -49,6 +49,9 @@ rejects such a module if it imports anything from WASI.
 | `starc_alloc` | `(n: i32) -> i32` | resets the per-call arena and returns a pointer to `n` bytes for call arguments |
 | `starc_error` | `() -> i64` | location of the last error message (see below), or 0 |
 | `starc_error_code` | `() -> i32` | cause of the last error (see [Errors](#errors)), or 0 |
+| `starc_frames` | `() -> i32` | number of frames of the last error (see [Backtraces](#backtraces)) |
+| `starc_frame` | `(i: i32) -> i64` | name of frame `i` of the last error, as a packed pointer/length pair |
+| `starc_frame_pos` | `(i: i32) -> i64` | position of frame `i`: line in the low, column in the high 32 bits; -1 for a built-in |
 | `starc_fuel_set` | `(n: i64) -> ()` | sets the remaining fuel budget (only with fuel metering, see [fuel.md](fuel.md)) |
 | `starc_fuel` | `() -> i64` | returns the remaining fuel budget (only with fuel metering) |
 | *function* | `(ptr: i32, len: i32) -> i64` | one export per exported top-level `def` |
@@ -56,17 +59,20 @@ rejects such a module if it imports anything from WASI.
 By default every top-level `def` whose name does not start with `_` is
 exported under its own name; `Options.Exports` / `-export` selects a
 subset. The names `memory`, `_initialize`, `_start`, `starc_alloc`,
-`starc_error`, `starc_error_code`, `starc_fuel_set` and `starc_fuel`
-are reserved.
+`starc_error`, `starc_error_code`, `starc_frames`, `starc_frame`,
+`starc_frame_pos`, `starc_fuel_set` and `starc_fuel` are reserved. The
+three frame functions are missing in modules built with
+`Options.NoBacktrace` (`-no-backtrace`).
 
 ### Command
 
 With `ExecModel: Command` (`-command`) the module exports `memory` and
 `_start`, plus the two fuel functions with fuel metering. `_start` runs
-the program. On error, `Error: <message>` is written to stderr and the
-module calls `proc_exit` with the error code as status (see
-[Errors](#errors)): 1 for a Starlark error, 2 for exhausted fuel, 3–5 for
-the other limits.
+the program. On error, the backtrace (see [Backtraces](#backtraces)) is
+written to stderr and the module calls `proc_exit` with the error code
+as status (see [Errors](#errors)): 1 for a Starlark error, 2 for
+exhausted fuel, 3–5 for the other limits. Without backtraces, only
+`Error: <message>` is written.
 
 ## Calling a function
 
@@ -107,6 +113,38 @@ errors (`abi: truncated value`, …), never reads beyond the buffer.
 | 3 | memory limit reached | `out of memory` |
 | 4 | call depth limit exceeded | `maximum call depth exceeded` |
 | 5 | arguments or result too large | `arguments too large: …`, `result too large: …`, `value too large to pass to the host` |
+
+### Backtraces
+
+Unless built with `Options.NoBacktrace`, a module records where an error
+occurred and the calls that led there, as go.starlark.net does in
+`EvalError.CallStack`: the positions are those that go.starlark.net
+reports. After an error, `starc_frames()` returns the number of frames,
+outermost first, and `starc_frame(i)` and `starc_frame_pos(i)` describe
+frame `i`. The outermost frame of an error in top-level code is
+`<toplevel>`; that of an exported call is the called function. A frame
+with position -1 is a built-in, such as `sorted` or a host function; the
+file of all other positions is `file` in [`starc.meta`](#metadata). A
+line of 0 means that the position is not known. The
+frames stay valid until the next call of `starc_alloc` or of an exported
+function. An error in decoding the arguments or encoding the result has
+no frames.
+
+A command module writes the backtrace in the format of go.starlark.net's
+`EvalError.Backtrace`, with a built-in innermost frame folded into the
+last line:
+
+```
+Traceback (most recent call last):
+  prog.star:9:2: in <toplevel>
+  prog.star:7:6: in g
+  prog.star:4:9: in f
+Error in fail: fail: boom 1
+```
+
+Recording costs a store before every operation that can fail and a few
+instructions per call: about 5–8 % of the run time of call-heavy code and
+4–5 % of the module size.
 
 ## Limits
 
@@ -208,7 +246,8 @@ The custom section `starc.meta` contains UTF-8 JSON:
   "no_wasi": true,
   "fuel": {"version": 1, "statement": 1, "call": 1, "iteration": 1,
            "runtime_iteration": 1, "bytes_per_unit": 16},
-  "limits": {"memory_pages": 65535, "call_depth": 500, "result_bytes": 65536}
+  "limits": {"memory_pages": 65535, "call_depth": 500, "result_bytes": 65536},
+  "file": "greet.star"
 }
 ```
 
@@ -217,7 +256,9 @@ Parameter names of `*args` and `**kwargs` parameters are prefixed with
 there are none; `no_wasi` is omitted for modules that may import WASI.
 `fuel` is the cost table of a module built with fuel metering
 ([fuel.md](fuel.md)) and is omitted otherwise. `limits` lists the
-[limits](#limits); the size limits are omitted when unlimited.
+[limits](#limits); the size limits are omitted when unlimited. `file` is
+the name of the source file in [backtraces](#backtraces) and is omitted
+for a module built without them.
 
 ## Example: JavaScript host
 

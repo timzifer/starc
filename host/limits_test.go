@@ -219,7 +219,8 @@ func TestLimitsCommand(t *testing.T) {
 	var errb strings.Builder
 	_, err := host.Load(context.Background(), wasm, &host.Config{Stderr: &errb})
 	var exit *host.ExitError
-	if !errors.As(err, &exit) || exit.Code != 3 || !errors.Is(err, host.ErrOutOfMemory) || errb.String() != "Error: out of memory\n" {
+	if !errors.As(err, &exit) || exit.Code != 3 || !errors.Is(err, host.ErrOutOfMemory) ||
+		errb.String() != "Traceback (most recent call last):\n  p.star:3:11: in <toplevel>\nError: out of memory\n" {
 		t.Errorf("err = %v, stderr %q", err, errb.String())
 	}
 }

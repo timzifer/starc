@@ -41,6 +41,12 @@ func BenchmarkCompiledFuel(b *testing.B) {
 	benchCompiled(b, Options{Command: true, Dialect: benchOpts, Fuel: true})
 }
 
+// BenchmarkCompiledNoBacktrace measures, against BenchmarkCompiled, the
+// overhead of source positions and the shadow call stack.
+func BenchmarkCompiledNoBacktrace(b *testing.B) {
+	benchCompiled(b, Options{Command: true, Dialect: benchOpts, NoBacktrace: true})
+}
+
 func benchCompiled(b *testing.B, opts Options) {
 	bin, err := Compile("b.star", []byte(benchSrc), opts)
 	if err != nil {

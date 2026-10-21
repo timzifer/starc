@@ -174,7 +174,7 @@ func TestFuelInit(t *testing.T) {
 	var out, errb bytes.Buffer
 	_, err = host.Load(ctx, wasm, &host.Config{InitFuel: 2500, Stdout: &out, Stderr: &errb})
 	var exit *host.ExitError
-	if !errors.As(err, &exit) || exit.Code != 2 || !errors.Is(err, host.ErrFuelExhausted) || errb.String() != "Error: fuel exhausted\n" || out.Len() == 0 {
+	if !errors.As(err, &exit) || exit.Code != 2 || !errors.Is(err, host.ErrFuelExhausted) || errb.String() != "Traceback (most recent call last):\n  p.star:2:10: in <toplevel>\nError in print: fuel exhausted\n" || out.Len() == 0 {
 		t.Errorf("command: %v, stdout %q, stderr %q", err, out.String(), errb.String())
 	}
 }

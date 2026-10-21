@@ -11,6 +11,20 @@ import (
 // they implement.
 var methodPrefixes = []string{"_str_", "_list_", "_dict_", "_set_"}
 
+// preludeShow returns the name of a prelude function in backtraces, as
+// the built-in it implements, or "" for an internal helper.
+func preludeShow(name string) string {
+	for _, p := range methodPrefixes {
+		if strings.HasPrefix(name, p) {
+			return name[len(p):]
+		}
+	}
+	if strings.HasPrefix(name, "_") || name == "lambda" {
+		return ""
+	}
+	return name
+}
+
 // reach computes which prelude definitions and primitive methods the
 // program can use, so that unused library code is not compiled.
 type reach struct {

@@ -18,6 +18,10 @@ type fcomp struct {
 	self   Local
 	loops  []*loop
 	spec   uint32 // non-zero if a recursion guard is active
+	// pos is the position of the operation being compiled, maintained as
+	// by go.starlark.net's compiler so that errors report the same
+	// positions.
+	pos syntax.Position
 }
 
 type loop struct {
@@ -27,6 +31,30 @@ type loop struct {
 }
 
 func (fc *fcomp) tmp() Local { return fc.f.Local(I32) }
+
+// setPos sets the position of the next operations that can fail.
+func (fc *fcomp) setPos(p syntax.Position) { fc.pos = p }
+
+// here yields code that records the current position for the operation
+// that follows. Positions within the prelude are not recorded: there,
+// errors are reported at the call of the built-in.
+func (fc *fcomp) here() Expr {
+	if fc.u.prelude {
+		return Nop()
+	}
+	return fc.c.r.SetPos(fc.c.r.Pos(int(fc.pos.Line), int(fc.pos.Col)))
+}
+
+// at sets the position to p and yields code that records it.
+func (fc *fcomp) at(p syntax.Position) Expr {
+	fc.setPos(p)
+	return fc.here()
+}
+
+// then yields x followed by recording p, for the last operand of an
+// operation at p: the position must be recorded after the operands have
+// been evaluated, which may record positions of their own.
+func (fc *fcomp) then(x Expr, p syntax.Position) Expr { return Seq{x, fc.at(p)} }
 
 // compileToplevel compiles the top-level statements of a unit.
 func (c *compiler) compileToplevel(u *unit) *Func {
@@ -40,7 +68,13 @@ func (c *compiler) compileToplevel(u *unit) *Func {
 			f.Add(Set(l, c.r.Call("cell", I32c(0))))
 		}
 	}
+	if !u.prelude {
+		f.Add(c.r.PushToplevel())
+	}
 	f.Add(fc.stmts(u.file.Stmts)...)
+	if !u.prelude {
+		f.Add(c.r.PopFrame())
+	}
 	return f
 }
 
@@ -52,7 +86,8 @@ func (fc *fcomp) function(fn *resolve.Function, outer *fcomp) Expr {
 	f := c.m.AddFunc(NewFunc(fc.u.name+"."+fn.Name, rt.CallType.Params, rt.CallType.Results...))
 	inner := &fcomp{c: c, u: fc.u, f: f, self: f.Param(2)}
 
-	// Parameters.
+	// Parameters. Errors in the defaults are reported at the def.
+	outer.setPos(fn.Pos)
 	var names []string
 	var defaults []Expr // by named-parameter index, nil if required
 	flags := 0
@@ -76,7 +111,13 @@ func (fc *fcomp) function(fn *resolve.Function, outer *fcomp) Expr {
 	if recursion {
 		flags |= rt.SpecRecursive
 	}
+	if fc.u.prelude {
+		flags |= rt.SpecPrelude
+	}
 	spec := r.Spec(fn.Name, names, fn.NumKwonlyParams, flags)
+	if show := preludeShow(fn.Name); fc.u.prelude && show != "" {
+		r.SpecShow(spec, show)
+	}
 	nparams := len(names)
 	if fn.HasVarargs {
 		nparams++
@@ -85,7 +126,11 @@ func (fc *fcomp) function(fn *resolve.Function, outer *fcomp) Expr {
 		nparams++
 	}
 
-	// Prologue.
+	// Prologue. Errors in binding the arguments are reported at the
+	// start of the body.
+	inner.setPos(c.entryPos(fn))
+	f.Add(inner.here())
+	inner.setPos(fn.Pos)
 	if !recursion {
 		inner.spec = spec
 		c.specs = append(c.specs, spec)
@@ -208,19 +253,18 @@ func (fc *fcomp) stmt(s syntax.Stmt) Expr {
 
 	case *syntax.AssignStmt:
 		if s.Op == syntax.EQ {
-			return fc.assign(s.LHS, fc.expr(s.RHS))
+			return fc.assign(s.LHS, fc.expr(s.RHS), s.OpPos)
 		}
 		op := augmentedOps[s.Op]
 		switch lhs := unparen(s.LHS).(type) {
 		case *syntax.Ident:
-			return fc.assign(lhs, fc.binop(op, fc.ident(lhs), fc.expr(s.RHS), true))
+			return fc.assign(lhs, fc.binop(op, fc.ident(lhs), fc.expr(s.RHS), true, s.OpPos), s.OpPos)
 		case *syntax.IndexExpr:
 			x, y := fc.tmp(), fc.tmp()
-			return Seq{
-				Set(x, fc.expr(lhs.X)),
-				Set(y, fc.expr(lhs.Y)),
-				r.Call("setindex", Get(x), Get(y), fc.binop(op, r.Call("index", Get(x), Get(y)), fc.expr(s.RHS), true)),
-			}
+			code := Seq{Set(x, fc.expr(lhs.X)), Set(y, fc.expr(lhs.Y))}
+			old := Seq{fc.at(lhs.Lbrack), r.Call("index", Get(x), Get(y))}
+			v := fc.binop(op, old, fc.expr(s.RHS), true, s.OpPos)
+			return append(code, r.Call("setindex", Get(x), Get(y), fc.then(v, lhs.Lbrack)))
 		default:
 			fc.c.errorf(s.OpPos, "invalid augmented assignment target")
 			return Nop()
@@ -235,10 +279,12 @@ func (fc *fcomp) stmt(s syntax.Stmt) Expr {
 		top := NewLabel()
 		head := Seq{
 			Set(x, fc.expr(s.X)),
+			fc.at(s.For),
 			Set(seq, r.Call("iter_begin", Get(x))),
 			Set(n, r.Call("seq_len", Get(seq))),
 			Set(i, I32c(0)),
 		}
+		vars := fc.assign(s.Vars, r.Call("seq_at", Get(seq), Get(i)), s.For)
 		fc.loops = append(fc.loops, l)
 		body := fc.block(s.Body, rt.FuelIteration)
 		fc.loops = fc.loops[:len(fc.loops)-1]
@@ -246,7 +292,7 @@ func (fc *fcomp) stmt(s syntax.Stmt) Expr {
 			head,
 			Block(l.brk, Loop(top,
 				BrIf(l.brk, I32GeS(Get(i), Get(n))),
-				fc.assign(s.Vars, r.Call("seq_at", Get(seq), Get(i))),
+				vars,
 				Set(i, I32Add(Get(i), I32c(1))),
 				Block(l.cont, body...),
 				Br(top),
@@ -287,7 +333,7 @@ func (fc *fcomp) stmt(s syntax.Stmt) Expr {
 		if fc.dropped(s) {
 			return Nop()
 		}
-		return fc.assign(s.Name, fc.function(s.Function.(*resolve.Function), fc))
+		return fc.assign(s.Name, fc.function(s.Function.(*resolve.Function), fc), s.Def)
 
 	case *syntax.LoadStmt:
 		fc.c.errorf(s.Load, "load statements are not supported")
@@ -315,8 +361,9 @@ func unparen(e syntax.Expr) syntax.Expr {
 	}
 }
 
-// assign yields code storing v into the target lhs.
-func (fc *fcomp) assign(lhs syntax.Expr, v Expr) Expr {
+// assign yields code storing v into the target lhs; pos is the position
+// of the assignment, where unpacking fails.
+func (fc *fcomp) assign(lhs syntax.Expr, v Expr, pos syntax.Position) Expr {
 	r := fc.c.r
 	switch lhs := unparen(lhs).(type) {
 	case *syntax.Ident:
@@ -339,15 +386,15 @@ func (fc *fcomp) assign(lhs syntax.Expr, v Expr) Expr {
 			elems = lhs.(*syntax.ListExpr).List
 		}
 		s := fc.tmp()
-		code := Seq{Set(s, r.Call("unpack", v, I32c(int32(len(elems)))))}
+		code := Seq{Set(s, r.Call("unpack", fc.then(v, pos), I32c(int32(len(elems)))))}
 		for i, e := range elems {
-			code = append(code, fc.assign(e, r.Call("seq_at", Get(s), I32c(int32(i)))))
+			code = append(code, fc.assign(e, r.Call("seq_at", Get(s), I32c(int32(i))), pos))
 		}
 		return code
 	case *syntax.IndexExpr:
 		// The right-hand side is evaluated before the target operands.
 		t := fc.tmp()
-		return Seq{Set(t, v), r.Call("setindex", fc.expr(lhs.X), fc.expr(lhs.Y), Get(t))}
+		return Seq{Set(t, v), r.Call("setindex", fc.expr(lhs.X), fc.then(fc.expr(lhs.Y), lhs.Lbrack), Get(t))}
 	}
 	start, _ := lhs.Span()
 	fc.c.errorf(start, "invalid assignment target")
@@ -359,9 +406,11 @@ func (fc *fcomp) assign(lhs syntax.Expr, v Expr) Expr {
 func (fc *fcomp) ident(id *syntax.Ident) Expr {
 	r := fc.c.r
 	b := id.Binding.(*resolve.Binding)
+	// A variable may be unbound: its position is recorded only then.
 	checked := func(v Expr) Expr {
 		t := fc.tmp()
-		return IfV(I32, Tee(t, v), Get(t), Seq{r.Call("unbound", r.S(id.Name)), Unreachable()})
+		fc.setPos(id.NamePos)
+		return IfV(I32, Tee(t, v), Get(t), Seq{fc.here(), r.Call("unbound", r.S(id.Name)), Unreachable()})
 	}
 	switch b.Scope {
 	case resolve.Local:
@@ -401,8 +450,10 @@ var binopNames = map[syntax.Token]string{
 	syntax.CIRCUMFLEX: rt.OpXor, syntax.LTLT: rt.OpShl, syntax.GTGT: rt.OpShr,
 }
 
-func (fc *fcomp) binop(op syntax.Token, x, y Expr, inplace bool) Expr {
+// binop yields x op y; pos is the position of the operator.
+func (fc *fcomp) binop(op syntax.Token, x, y Expr, inplace bool, pos syntax.Position) Expr {
 	r := fc.c.r
+	y = fc.then(y, pos)
 	if inplace && op == syntax.PLUS {
 		return r.Call("inplace_add", x, y)
 	}
@@ -448,12 +499,17 @@ func (fc *fcomp) expr(e syntax.Expr) Expr {
 		code := Seq{Set(t, r.Call("dict_new"))}
 		for _, x := range e.List {
 			ent := x.(*syntax.DictEntry)
-			code = append(code, r.Call("dict_lit_set", Get(t), fc.expr(ent.Key), fc.expr(ent.Value)))
+			code = append(code, r.Call("dict_lit_set", Get(t), fc.expr(ent.Key), fc.then(fc.expr(ent.Value), ent.Colon)))
 		}
 		return append(code, Get(t))
 
 	case *syntax.UnaryExpr:
 		x := fc.expr(e.X)
+		if e.Op == syntax.NOT {
+			fc.setPos(e.OpPos) // not cannot fail
+		} else {
+			x = fc.then(x, e.OpPos)
+		}
 		switch e.Op {
 		case syntax.MINUS:
 			return r.Call("neg", x)
@@ -474,32 +530,41 @@ func (fc *fcomp) expr(e syntax.Expr) Expr {
 				return Seq{x, IfV(I32, r.Call("truth", Get(t)), fc.expr(e.Y), Get(t))}
 			}
 			return Seq{x, IfV(I32, r.Call("truth", Get(t)), Get(t), fc.expr(e.Y))}
-		case syntax.EQL:
-			return fc.boolv(r.Call("eq", fc.expr(e.X), fc.expr(e.Y)))
-		case syntax.NEQ:
-			return fc.boolv(I32Eqz(r.Call("eq", fc.expr(e.X), fc.expr(e.Y))))
-		case syntax.LT:
-			return fc.boolv(I32LtS(r.Call("cmp", fc.expr(e.X), fc.expr(e.Y), r.S("<")), I32c(0)))
-		case syntax.GT:
-			return fc.boolv(I32GtS(r.Call("cmp", fc.expr(e.X), fc.expr(e.Y), r.S(">")), I32c(0)))
-		case syntax.LE:
-			return fc.boolv(I32LeS(r.Call("cmp", fc.expr(e.X), fc.expr(e.Y), r.S("<=")), I32c(0)))
-		case syntax.GE:
-			return fc.boolv(I32GeS(r.Call("cmp", fc.expr(e.X), fc.expr(e.Y), r.S(">=")), I32c(0)))
-		case syntax.IN:
-			return fc.boolv(r.Call("contains", fc.expr(e.X), fc.expr(e.Y)))
-		case syntax.NOT_IN:
-			return fc.boolv(I32Eqz(r.Call("contains", fc.expr(e.X), fc.expr(e.Y))))
+		}
+		x, y := fc.expr(e.X), fc.expr(e.Y)
+		if e.Op == syntax.PLUS && plusFolded(e) {
+			// go.starlark.net adds the literals at compile time, so this
+			// addition, which cannot fail, has no position.
+			return r.Call(rt.BinOps[rt.OpAdd], x, y)
 		}
 		if _, ok := binopNames[e.Op]; ok {
-			return fc.binop(e.Op, fc.expr(e.X), fc.expr(e.Y), false)
+			return fc.binop(e.Op, x, y, false, e.OpPos)
+		}
+		y = fc.then(y, e.OpPos)
+		switch e.Op {
+		case syntax.EQL:
+			return fc.boolv(r.Call("eq", x, y))
+		case syntax.NEQ:
+			return fc.boolv(I32Eqz(r.Call("eq", x, y)))
+		case syntax.LT:
+			return fc.boolv(I32LtS(r.Call("cmp", x, y, r.S("<")), I32c(0)))
+		case syntax.GT:
+			return fc.boolv(I32GtS(r.Call("cmp", x, y, r.S(">")), I32c(0)))
+		case syntax.LE:
+			return fc.boolv(I32LeS(r.Call("cmp", x, y, r.S("<=")), I32c(0)))
+		case syntax.GE:
+			return fc.boolv(I32GeS(r.Call("cmp", x, y, r.S(">=")), I32c(0)))
+		case syntax.IN:
+			return fc.boolv(r.Call("contains", x, y))
+		case syntax.NOT_IN:
+			return fc.boolv(I32Eqz(r.Call("contains", x, y)))
 		}
 
 	case *syntax.CondExpr:
 		return IfV(I32, r.Call("truth", fc.expr(e.Cond)), fc.expr(e.True), fc.expr(e.False))
 
 	case *syntax.IndexExpr:
-		return r.Call("index", fc.expr(e.X), fc.expr(e.Y))
+		return r.Call("index", fc.expr(e.X), fc.then(fc.expr(e.Y), e.Lbrack))
 
 	case *syntax.SliceExpr:
 		opt := func(x syntax.Expr) Expr {
@@ -508,13 +573,15 @@ func (fc *fcomp) expr(e syntax.Expr) Expr {
 			}
 			return fc.expr(x)
 		}
-		return r.Call("slice", fc.expr(e.X), opt(e.Lo), opt(e.Hi), opt(e.Step))
+		x, lo, hi, step := fc.expr(e.X), opt(e.Lo), opt(e.Hi), opt(e.Step)
+		fc.setPos(fc.c.slicePos(e))
+		return r.Call("slice", x, lo, hi, Seq{step, fc.here()})
 
 	case *syntax.DotExpr:
 		if n, ok := fc.c.hostRef(e); ok {
 			return fc.c.hostExpr(n)
 		}
-		return r.Call("attr", fc.expr(e.X), I32c(int32(r.MethodID(e.Name.Name))))
+		return r.Call("attr", fc.then(fc.expr(e.X), e.Dot), I32c(int32(r.MethodID(e.Name.Name))))
 
 	case *syntax.CallExpr:
 		return fc.call(e)
@@ -547,34 +614,18 @@ func (fc *fcomp) tuple(elems []syntax.Expr) Expr {
 
 func (fc *fcomp) call(e *syntax.CallExpr) Expr {
 	r := fc.c.r
-	var pos []syntax.Expr
-	var star []syntax.Expr // positional items: nil entry means "plain"
-	var kwNames []string
-	var kwVals []syntax.Expr
-	var kwStar []syntax.Expr
-	hasStar := false
+	npos, nkw := 0, 0
+	var star, kwStar []syntax.Expr
 	for _, a := range e.Args {
-		switch a := a.(type) {
-		case *syntax.UnaryExpr:
-			if a.Op == syntax.STAR {
-				hasStar = true
-				pos = append(pos, a.X)
-				star = append(star, a.X)
-				continue
-			}
-			if a.Op == syntax.STARSTAR {
-				kwStar = append(kwStar, a.X)
-				continue
-			}
-		case *syntax.BinaryExpr:
-			if a.Op == syntax.EQ {
-				kwNames = append(kwNames, a.X.(*syntax.Ident).Name)
-				kwVals = append(kwVals, a.Y)
-				continue
-			}
+		if u, ok := a.(*syntax.UnaryExpr); ok && u.Op == syntax.STAR {
+			star = append(star, u.X)
+		} else if ok && u.Op == syntax.STARSTAR {
+			kwStar = append(kwStar, u.X)
+		} else if b, ok := a.(*syntax.BinaryExpr); ok && b.Op == syntax.EQ {
+			nkw++
+		} else {
+			npos++
 		}
-		pos = append(pos, a)
-		star = append(star, nil)
 	}
 
 	// The callee is evaluated first. For a method call, that is the
@@ -589,55 +640,68 @@ func (fc *fcomp) call(e *syntax.CallExpr) Expr {
 		rv := fc.tmp()
 		code = append(code,
 			Set(rv, fc.expr(dot.X)),
+			fc.at(dot.Dot),
 			Set(fnT, r.Call("method_resolve", Get(rv), I32c(int32(r.MethodID(dot.Name.Name))))))
 		recv = Get(rv)
 	} else {
 		code = append(code, Set(fnT, fc.expr(e.Fn)))
 	}
 
-	// Positional arguments.
-	args := fc.tmp()
+	// As in go.starlark.net, the positional and keyword arguments are
+	// evaluated in order, then the operands of *args and **kwargs; these
+	// are unpacked by the call itself, where their errors are reported.
 	offset := 0
 	if recv != nil {
 		offset = 1
 	}
-	if !hasStar {
-		code = append(code, Set(args, r.Call("tuple_new", I32c(int32(len(pos)+offset)))))
+	args, l := fc.tmp(), Local{}
+	if len(star) == 0 {
+		code = append(code, Set(args, r.Call("tuple_new", I32c(int32(npos+offset)))))
 		if recv != nil {
 			code = append(code, r.TupleSet(Get(args), 0, recv))
 		}
-		for i, x := range pos {
-			code = append(code, r.TupleSet(Get(args), i+offset, fc.expr(x)))
-		}
 	} else {
-		l := fc.tmp()
-		code = append(code, Set(l, r.Call("list_new", I32c(int32(len(pos)+offset)))))
+		l = fc.tmp()
+		code = append(code, Set(l, r.Call("list_new", I32c(int32(npos+offset)))))
 		if recv != nil {
 			code = append(code, r.Call("list_append_raw", Get(l), recv))
 		}
-		for i, x := range pos {
-			if star[i] != nil {
-				code = append(code, r.Call("list_extend", Get(l), fc.expr(x)))
-			} else {
-				code = append(code, r.Call("list_append_raw", Get(l), fc.expr(x)))
-			}
-		}
-		code = append(code, Set(args, r.Call("tuple_from", Get(l))))
 	}
-
-	// Keyword arguments.
-	kw := I32c(0)
-	if len(kwNames) > 0 || len(kwStar) > 0 {
-		d := fc.tmp()
+	kw, d := I32c(0), Local{}
+	if nkw > 0 || len(kwStar) > 0 {
+		d = fc.tmp()
 		code = append(code, Set(d, r.Call("dict_new")))
-		for i, name := range kwNames {
-			code = append(code, r.Call("dict_set", Get(d), r.S(name), fc.expr(kwVals[i])))
-		}
-		for _, x := range kwStar {
-			code = append(code, r.Call("kwargs_merge", Get(d), fc.expr(x)))
-		}
 		kw = Get(d)
 	}
+	i := offset
+	for _, a := range e.Args {
+		if u, ok := a.(*syntax.UnaryExpr); ok && (u.Op == syntax.STAR || u.Op == syntax.STARSTAR) {
+			continue
+		}
+		if b, ok := a.(*syntax.BinaryExpr); ok && b.Op == syntax.EQ {
+			code = append(code, r.Call("dict_set", Get(d), r.S(b.X.(*syntax.Ident).Name), fc.expr(b.Y)))
+		} else if len(star) == 0 {
+			code = append(code, r.TupleSet(Get(args), i, fc.expr(a)))
+			i++
+		} else {
+			code = append(code, r.Call("list_append_raw", Get(l), fc.expr(a)))
+		}
+	}
+	var unpack Seq
+	for _, x := range star {
+		t := fc.tmp()
+		code = append(code, Set(t, fc.expr(x)))
+		unpack = append(unpack, r.Call("list_extend", Get(l), Get(t)))
+	}
+	if len(star) > 0 {
+		unpack = append(unpack, Set(args, r.Call("tuple_from", Get(l))))
+	}
+	for _, x := range kwStar {
+		t := fc.tmp()
+		code = append(code, Set(t, fc.expr(x)))
+		unpack = append(unpack, r.Call("kwargs_merge", Get(d), Get(t)))
+	}
+	code = append(code, fc.at(e.Lparen), unpack)
 	// For a method call, args[0] is the receiver, unless it is a module
 	// or a struct.
 	if recv != nil {
@@ -648,7 +712,16 @@ func (fc *fcomp) call(e *syntax.CallExpr) Expr {
 			return r.Call("call", Get(fnT), Get(args), kw)
 		}))
 	}
-	return append(code, r.Call("call", Get(fnT), Get(args), kw))
+	callee := "call"
+	if fc.u.prelude && r.Cfg.Backtrace {
+		// A local of the prelude, such as key, holds a callable of the
+		// program, whose frame is shown in backtraces.
+		if id, ok := e.Fn.(*syntax.Ident); ok && id.Binding.(*resolve.Binding).Scope != resolve.Global &&
+			id.Binding.(*resolve.Binding).Scope != resolve.Universal {
+			callee = "call_cb"
+		}
+	}
+	return append(code, r.Call(callee, Get(fnT), Get(args), kw))
 }
 
 func (fc *fcomp) comprehension(e *syntax.Comprehension) Expr {
@@ -665,7 +738,7 @@ func (fc *fcomp) comprehension(e *syntax.Comprehension) Expr {
 		if i == len(e.Clauses) {
 			if e.Curly {
 				ent := e.Body.(*syntax.DictEntry)
-				return r.Call("dict_set", Get(res), fc.expr(ent.Key), fc.expr(ent.Value))
+				return r.Call("dict_set", Get(res), fc.expr(ent.Key), fc.then(fc.expr(ent.Value), ent.Colon))
 			}
 			return r.Call("list_append_raw", Get(res), fc.expr(e.Body))
 		}
@@ -675,15 +748,20 @@ func (fc *fcomp) comprehension(e *syntax.Comprehension) Expr {
 		case *syntax.ForClause:
 			x, seq, n, j := fc.tmp(), fc.tmp(), fc.tmp(), fc.tmp()
 			brk, top := NewLabel(), NewLabel()
-			return Seq{
+			head := Seq{
 				Set(x, fc.expr(cl.X)),
+				fc.at(cl.For),
 				Set(seq, r.Call("iter_begin", Get(x))),
 				Set(n, r.Call("seq_len", Get(seq))),
 				Set(j, I32c(0)),
+			}
+			vars := fc.assign(cl.Vars, r.Call("seq_at", Get(seq), Get(j)), cl.For)
+			return Seq{
+				head,
 				Block(brk, Loop(top,
 					BrIf(brk, I32GeS(Get(j), Get(n))),
 					r.ChargeN(rt.FuelIteration),
-					fc.assign(cl.Vars, r.Call("seq_at", Get(seq), Get(j))),
+					vars,
 					Set(j, I32Add(Get(j), I32c(1))),
 					gen(i+1),
 					Br(top),
@@ -695,4 +773,88 @@ func (fc *fcomp) comprehension(e *syntax.Comprehension) Expr {
 	}
 	code = append(code, gen(0), Get(res))
 	return code
+}
+
+// entryPos returns the position at which go.starlark.net reports errors
+// in a call before the body of fn runs, such as in binding the arguments:
+// that of the first instruction of the body, or of the def if that
+// instruction has none.
+func (c *compiler) entryPos(fn *resolve.Function) syntax.Position {
+	for _, st := range fn.Body {
+		s := &psim{c: c}
+		entry := s.newBlock()
+		s.cur = entry
+		switch st := st.(type) {
+		case *syntax.BranchStmt:
+			if st.Token == syntax.PASS {
+				continue
+			}
+		case *syntax.ExprStmt:
+			if _, ok := st.X.(*syntax.Literal); ok {
+				continue // go.starlark.net does not compile doc strings
+			}
+			s.expr(st.X)
+		case *syntax.AssignStmt:
+			switch lhs := unparen(st.LHS).(type) {
+			case *syntax.IndexExpr:
+				if st.Op != syntax.EQ {
+					s.expr(lhs.X)
+					break
+				}
+				s.expr(st.RHS)
+			case *syntax.Ident:
+				if st.Op != syntax.EQ {
+					s.expr(lhs)
+					break
+				}
+				s.expr(st.RHS)
+			default:
+				s.expr(st.RHS)
+			}
+		case *syntax.IfStmt:
+			s.ifelse(st.Cond, s.newBlock(), s.newBlock())
+		case *syntax.WhileStmt:
+			s.ifelse(st.Cond, s.newBlock(), s.newBlock())
+		case *syntax.ForStmt:
+			s.expr(st.X)
+		case *syntax.ReturnStmt:
+			if st.Result != nil {
+				s.expr(st.Result)
+			}
+		case *syntax.DefStmt:
+			s.function(st.Function.(*resolve.Function))
+		}
+		if len(entry.insns) > 0 && entry.insns[0].pos.Line != 0 {
+			return entry.insns[0].pos
+		}
+		break
+	}
+	return fn.Pos
+}
+
+// plusFolded reports whether go.starlark.net folds the addition e at
+// compile time: it adds adjacent string, list or tuple literals of a chain
+// a + b + ... (see addable in its compiler).
+func plusFolded(e *syntax.BinaryExpr) bool {
+	left := unparen(e.X)
+	if l, ok := left.(*syntax.BinaryExpr); ok && l.Op == syntax.PLUS {
+		left = unparen(l.Y)
+	}
+	a := addable(left)
+	return a != 0 && a == addable(unparen(e.Y))
+}
+
+// addable classifies the literals that go.starlark.net folds.
+func addable(e syntax.Expr) rune {
+	switch e := e.(type) {
+	case *syntax.Literal:
+		if e.Token == syntax.STRING {
+			return 's'
+		}
+	case *syntax.ListExpr:
+		return 'l'
+	case *syntax.TupleExpr:
+		return 't'
+	}
+	return 0
 }

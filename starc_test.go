@@ -32,11 +32,16 @@ func TestCompileVariants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// CompileFile names the file by its path, which appears in backtraces.
 	c, err := starc.CompileFile(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(a) != string(b) || len(c) != len(a) {
+	d, err := starc.Compile(path, []byte(src), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(a) != string(b) || string(c) != string(d) {
 		t.Error("compilation is not deterministic across entry points")
 	}
 	if string(a[:4]) != "\x00asm" {
