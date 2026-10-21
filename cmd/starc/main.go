@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -94,6 +95,8 @@ type buildOpts struct {
 	noNames bool
 	host    string
 	noWASI  bool
+	fuel    bool
+	budget  int64
 	dialect starc.Dialect
 }
 
@@ -107,6 +110,8 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 	fs.BoolVar(&o.noNames, "no-names", false, "omit the debug name section")
 	fs.StringVar(&o.host, "host", "", "comma-separated host functions to import, such as ctx.entity,now")
 	fs.BoolVar(&o.noWASI, "no-wasi", false, "import nothing but host functions (print goes to the host)")
+	fs.BoolVar(&o.fuel, "fuel", false, "compile deterministic fuel metering into the module (run: report the fuel used)")
+	fs.Int64Var(&o.budget, "budget", 0, "run: fuel budget for the top-level code and for the call (implies -fuel; 0 = unlimited)")
 	fs.BoolVar(&o.dialect.While, "while", false, "allow while loops")
 	fs.BoolVar(&o.dialect.TopLevelControl, "toplevel-control", false, "allow if/for/while at top level")
 	fs.BoolVar(&o.dialect.GlobalReassign, "global-reassign", false, "allow reassignment of top-level names")
@@ -119,7 +124,7 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 }
 
 func (o *buildOpts) options() *starc.Options {
-	opts := &starc.Options{NoNames: o.noNames, NoWASI: o.noWASI, Dialect: o.dialect}
+	opts := &starc.Options{NoNames: o.noNames, NoWASI: o.noWASI, Fuel: o.fuel || o.budget > 0, Dialect: o.dialect}
 	if o.command {
 		opts.ExecModel = starc.Command
 	}
@@ -228,7 +233,15 @@ func runCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return report(stderr, err)
 	}
 	ctx := context.Background()
-	m, err := host.Load(ctx, wasm, &host.Config{Stdout: stdout, Stderr: stderr})
+	if o.budget < 0 {
+		fmt.Fprintln(stderr, "starc: negative -budget")
+		return 2
+	}
+	budget := o.budget
+	if budget == 0 {
+		budget = math.MaxInt64
+	}
+	m, err := host.Load(ctx, wasm, &host.Config{Stdout: stdout, Stderr: stderr, InitFuel: o.budget})
 	if err != nil {
 		var exit *host.ExitError
 		if errors.As(err, &exit) {
@@ -237,8 +250,20 @@ func runCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return report(stderr, err)
 	}
 	defer m.Close(ctx)
+	// reportFuel prints the fuel used since the budget was set.
+	reportFuel := func() {
+		if rest, err := m.Fuel(ctx); err == nil && (o.fuel || o.budget > 0) {
+			fmt.Fprintf(stderr, "fuel used: %d\n", budget-rest)
+		}
+	}
 	if fs.NArg() == 1 {
+		reportFuel()
 		return 0
+	}
+	if m.Meta().Fuel != nil {
+		if err := m.SetFuel(ctx, budget); err != nil {
+			return report(stderr, err)
+		}
 	}
 	callArgs := make([]any, 0, fs.NArg()-2)
 	for _, a := range fs.Args()[2:] {
@@ -250,6 +275,7 @@ func runCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		callArgs = append(callArgs, v)
 	}
 	res, err := m.Call(ctx, fs.Arg(1), callArgs...)
+	reportFuel()
 	if err != nil {
 		return report(stderr, err)
 	}

@@ -110,7 +110,7 @@ func (fc *fcomp) function(fn *resolve.Function, outer *fcomp) Expr {
 		inner.free = append(inner.free, l)
 		f.Add(Set(l, r.FreeVar(Get(f.Param(2)), i)))
 	}
-	f.Add(inner.stmts(fn.Body)...)
+	f.Add(inner.block(fn.Body, rt.FuelCall)...)
 	f.Add(inner.ret(r.NoneV()))
 
 	// Closure construction in the enclosing function.
@@ -173,8 +173,12 @@ func (fc *fcomp) ret(v Expr) Expr {
 
 // ---- statements ----
 
-func (fc *fcomp) stmts(stmts []syntax.Stmt) []Expr {
-	var out []Expr
+func (fc *fcomp) stmts(stmts []syntax.Stmt) []Expr { return fc.block(stmts, 0) }
+
+// block compiles a statement list. With fuel metering, the statements
+// and extra are charged together on entry.
+func (fc *fcomp) block(stmts []syntax.Stmt, extra int64) []Expr {
+	out := []Expr{fc.c.r.ChargeN(int64(len(stmts))*rt.FuelStatement + extra)}
 	for _, s := range stmts {
 		out = append(out, fc.stmt(s))
 	}
@@ -221,7 +225,7 @@ func (fc *fcomp) stmt(s syntax.Stmt) Expr {
 			Set(i, I32c(0)),
 		}
 		fc.loops = append(fc.loops, l)
-		body := fc.stmts(s.Body)
+		body := fc.block(s.Body, rt.FuelIteration)
 		fc.loops = fc.loops[:len(fc.loops)-1]
 		return Seq{
 			head,
@@ -242,6 +246,7 @@ func (fc *fcomp) stmt(s syntax.Stmt) Expr {
 		body := fc.stmts(s.Body)
 		fc.loops = fc.loops[:len(fc.loops)-1]
 		return Block(l.brk, Loop(top,
+			r.ChargeN(rt.FuelIteration),
 			BrIf(l.brk, I32Eqz(r.Call("truth", fc.expr(s.Cond)))),
 			Block(l.cont, body...),
 			Br(top),
@@ -661,6 +666,7 @@ func (fc *fcomp) comprehension(e *syntax.Comprehension) Expr {
 				Set(j, I32c(0)),
 				Block(brk, Loop(top,
 					BrIf(brk, I32GeS(Get(j), Get(n))),
+					r.ChargeN(rt.FuelIteration),
 					fc.assign(cl.Vars, r.Call("seq_at", Get(seq), Get(j))),
 					Set(j, I32Add(Get(j), I32c(1))),
 					gen(i+1),

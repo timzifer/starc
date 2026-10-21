@@ -34,8 +34,15 @@ func BenchmarkInterpreter(b *testing.B) {
 	}
 }
 
-func BenchmarkCompiled(b *testing.B) {
-	bin, err := Compile("b.star", []byte(benchSrc), Options{Command: true, Dialect: benchOpts})
+func BenchmarkCompiled(b *testing.B) { benchCompiled(b, Options{Command: true, Dialect: benchOpts}) }
+
+// BenchmarkCompiledFuel measures the overhead of fuel metering.
+func BenchmarkCompiledFuel(b *testing.B) {
+	benchCompiled(b, Options{Command: true, Dialect: benchOpts, Fuel: true})
+}
+
+func benchCompiled(b *testing.B, opts Options) {
+	bin, err := Compile("b.star", []byte(benchSrc), opts)
 	if err != nil {
 		b.Fatal(err)
 	}

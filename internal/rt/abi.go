@@ -21,7 +21,13 @@ func (r *RT) registerABI() {
 	// abi_alloc(n): resets the per-call arena and allocates n bytes for
 	// the host to write call arguments into.
 	r.define("abi_alloc", p1, r1, func(f *Func) {
-		f.Add(r.Call("arena_reset"), r.Call("alloc", get(f.Param(0))))
+		f.Add(
+			// A new call begins: forget the error of the last one.
+			GSet(r.ErrObj, c32(0)),
+			GSet(r.ErrCode, c32(0)),
+			r.Call("arena_reset"),
+			r.Call("alloc", get(f.Param(0))),
+		)
 	})
 	// abi_error() -> packed (ptr | len<<32) of the last error message
 	r.define("abi_error", p0, ri, func(f *Func) {
@@ -62,13 +68,13 @@ func (r *RT) registerABI() {
 				// Each element takes at least one byte.
 				need(get(n)),
 				Set(o, r.Call("tuple_new", get(n))),
-				forRange(i, c32(0), get(n), st(elem(get(o), offTupElems, get(i)), 0, r.Call("decode"))),
+				r.forRange(i, c32(0), get(n), st(elem(get(o), offTupElems, get(i)), 0, r.Call("decode"))),
 				Return(IfV(I32, eq(get(t), c32(ABIList)), r.Call("list_of", get(o)), get(o))),
 			}),
 			// dict: each entry takes at least two bytes.
 			If(I32GtU(get(n), I32ShrU(sub(GGet(r.CurEnd), cur()), c32(1))), r.Fail("abi: truncated value")),
 			Set(o, r.Call("dict_new")),
-			forRange(i, c32(0), get(n),
+			r.forRange(i, c32(0), get(n),
 				Set(k, r.Call("decode")),
 				r.Call("dict_set", get(o), get(k), r.Call("decode"))),
 			get(o),
@@ -111,13 +117,13 @@ func (r *RT) registerABI() {
 			If(or(eq(get(t), c32(TList)), eq(get(t), c32(TTuple))), Seq{
 				Set(s, c32(5)),
 				Set(n, ld(get(v), 4)),
-				forRange(i, c32(0), get(n),
+				r.forRange(i, c32(0), get(n),
 					Set(s, add(get(s), r.Call("enc_size", ld(elem(r.Call("seq_base", get(v)), 0, get(i)), 0))))),
 				Return(get(s)),
 			}),
 			If(eq(get(t), c32(TDict)), Seq{
 				Set(s, c32(5)),
-				forRange(i, c32(0), ld(get(v), offDictUsed),
+				r.forRange(i, c32(0), ld(get(v), offDictUsed),
 					Set(e, add(ld(get(v), offDictEntries), mul(get(i), c32(12)))),
 					If(ld(get(e), 4), Set(s, add(get(s), add(r.Call("enc_size", ld(get(e), 4)), r.Call("enc_size", ld(get(e), 8))))))),
 				Return(get(s)),
@@ -140,19 +146,19 @@ func (r *RT) registerABI() {
 			If(eq(get(t), c32(TFloat)), Seq{putTag(c32(ABIFloat)), F64Store(cur(), 0, f64v(get(v))), adv(c32(8)), Return(nil)}),
 			If(eq(get(t), c32(TString)), Seq{
 				putTag(c32(ABIStr)), st(cur(), 0, slen(get(v))), adv(c32(4)),
-				MemoryCopy(cur(), sbytes(get(v)), slen(get(v))), adv(slen(get(v))),
+				r.memcopy(cur(), sbytes(get(v)), slen(get(v))), adv(slen(get(v))),
 				Return(nil),
 			}),
 			If(or(eq(get(t), c32(TList)), eq(get(t), c32(TTuple))), Seq{
 				putTag(IfV(I32, eq(get(t), c32(TList)), c32(ABIList), c32(ABITuple))),
 				Set(n, ld(get(v), 4)),
 				st(cur(), 0, get(n)), adv(c32(4)),
-				forRange(i, c32(0), get(n), r.Call("encode", ld(elem(r.Call("seq_base", get(v)), 0, get(i)), 0))),
+				r.forRange(i, c32(0), get(n), r.Call("encode", ld(elem(r.Call("seq_base", get(v)), 0, get(i)), 0))),
 				Return(nil),
 			}),
 			putTag(c32(ABIDict)),
 			st(cur(), 0, ld(get(v), offDictLen)), adv(c32(4)),
-			forRange(i, c32(0), ld(get(v), offDictUsed),
+			r.forRange(i, c32(0), ld(get(v), offDictUsed),
 				Set(e, add(ld(get(v), offDictEntries), mul(get(i), c32(12)))),
 				If(ld(get(e), 4), Seq{r.Call("encode", ld(get(e), 4)), r.Call("encode", ld(get(e), 8))})),
 		)

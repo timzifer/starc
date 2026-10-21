@@ -65,6 +65,12 @@ type Options struct {
 	// print calls the host import starc_print, and errors are reported
 	// through starc_error only. It cannot be combined with Command.
 	NoWASI bool
+	// Fuel compiles deterministic fuel metering into the module: every
+	// statement, call, loop iteration and unit of library work costs fuel
+	// according to a versioned cost table (see docs/fuel.md). The host
+	// sets the budget with starc_fuel_set; when it is exhausted, the
+	// program fails with "fuel exhausted" (starc_error_code 2).
+	Fuel bool
 }
 
 // HostFunc declares a function provided by the host.
@@ -73,6 +79,10 @@ type HostFunc struct {
 	// example "now" or "ctx.entity". The program calls it as ctx.entity(...);
 	// ctx is then a predeclared module value.
 	Name string
+	// Cost is the fuel charged for each call, in addition to the cost of
+	// a call and of passing the arguments and the result. The host can
+	// charge more during the call (see host.ChargeFuel).
+	Cost int64
 }
 
 // Position is a source location.
@@ -117,15 +127,25 @@ func Compile(filename string, src []byte, opts *Options) ([]byte, error) {
 		opts = &Options{}
 	}
 	var host []string
+	costs := map[string]int64{}
 	for _, h := range opts.Host {
+		if h.Cost < 0 {
+			return nil, fmt.Errorf("host function %q: negative cost %d", h.Name, h.Cost)
+		}
+		if c, dup := costs[h.Name]; dup && c != h.Cost {
+			return nil, fmt.Errorf("host function %q declared with costs %d and %d", h.Name, c, h.Cost)
+		}
 		host = append(host, h.Name)
+		costs[h.Name] = h.Cost
 	}
 	bin, err := compiler.Compile(filename, src, compiler.Options{
-		Command: opts.ExecModel == Command,
-		Exports: opts.Exports,
-		Names:   !opts.NoNames,
-		Host:    host,
-		NoWASI:  opts.NoWASI,
+		Command:  opts.ExecModel == Command,
+		Exports:  opts.Exports,
+		Names:    !opts.NoNames,
+		Host:     host,
+		HostCost: costs,
+		NoWASI:   opts.NoWASI,
+		Fuel:     opts.Fuel,
 		Dialect: syntax.FileOptions{
 			While:           opts.Dialect.While,
 			TopLevelControl: opts.Dialect.TopLevelControl,

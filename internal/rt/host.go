@@ -44,15 +44,22 @@ func (r *RT) HasModules() bool { return r.modules }
 
 // HostBuiltin returns a static builtin object that calls the host
 // function with the given dotted name.
-func (r *RT) HostBuiltin(name string) uint32 {
+func (r *RT) HostBuiltin(name string, cost int64) uint32 {
 	im := r.M.AddImport(&Import{Module: HostModule, Name: name, Type: FuncType{Params: p2, Results: r1}})
 	r.hostFuncs = append(r.hostFuncs, name)
 	f := r.M.AddFunc(NewFunc("host."+name, CallType.Params, CallType.Results...))
 	p := f.Local(I32)
+	n := f.Local(I32)
 	f.Add(
+		r.ChargeN(FuelCall+cost),
 		Set(p, r.Call("host_args", get(f.Param(0)), get(f.Param(1)))),
-		r.Call("host_result", Call(im, get(p), sub(GGet(r.Cursor), get(p)))),
+		Set(n, Call(im, get(p), sub(GGet(r.Cursor), get(p)))),
 	)
+	if r.Cfg.Fuel {
+		// The host may have charged fuel during the call.
+		f.Add(r.Charge(I64c(0)))
+	}
+	f.Add(r.Call("host_result", get(n)))
 	display := name
 	if i := lastDot(name); i >= 0 {
 		display = name[i+1:]
@@ -105,7 +112,7 @@ func (r *RT) registerHost() {
 		f.Add(
 			If(isTag(ld(get(args), offTupElems), TModule), Seq{
 				Set(t, r.Call("tuple_new", sub(ld(get(args), offTupLen), c32(1)))),
-				MemoryCopy(add(get(t), c32(offTupElems)), add(get(args), c32(offTupElems+4)),
+				r.memcopy(add(get(t), c32(offTupElems)), add(get(args), c32(offTupElems+4)),
 					I32Shl(ld(get(t), offTupLen), c32(2))),
 				Return(r.Call("call", get(fn), get(t), get(kw))),
 			}),
@@ -117,7 +124,7 @@ func (r *RT) registerHost() {
 		m, id := f.Param(0), f.Param(1)
 		i, e := f.Local(I32), f.Local(I32)
 		f.Add(
-			forRange(i, c32(0), ld(get(m), offModLen),
+			r.forRange(i, c32(0), ld(get(m), offModLen),
 				Set(e, add(ld(get(m), offModMembers), I32Shl(get(i), c32(3)))),
 				If(eq(ld(get(e), 0), get(id)), Return(ld(get(e), 4))),
 			),

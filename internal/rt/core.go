@@ -141,6 +141,8 @@ type Config struct {
 	// NoWASI removes all WASI imports: print calls the host import
 	// starc_host.starc_print instead of fd_write. It excludes Command.
 	NoWASI bool
+	// Fuel enables fuel metering (see fuel.go).
+	Fuel bool
 }
 
 // RT is the runtime library for one module.
@@ -159,6 +161,8 @@ type RT struct {
 	IntCache *Global // table of preallocated small ints, or 0
 	HeapMax  *Global // high-water mark of the heap
 	CmpDepth *Global // nesting depth of the current comparison
+	Fuel     *Global // remaining fuel (i64), with Config.Fuel
+	ErrCode  *Global // code of the last error (ErrStarlark, ErrFuel)
 
 	None, False, True uint32
 
@@ -232,6 +236,7 @@ func New(m *Module, cfg Config) *RT {
 	}
 	r.hostRes = m.AddImport(&Import{Module: HostModule, Name: HostResult, Type: FuncType{Params: p1}})
 
+	r.initFuel()
 	r.registerCore()
 	r.registerNum()
 	r.registerStr()
@@ -280,7 +285,7 @@ func (r *RT) Finish() *Func {
 		t, i, o := f.Local(I32), f.Local(I32), f.Local(I32)
 		f.Add(
 			Set(t, r.Call("alloc", c32(4*intCacheSize))),
-			forRange(i, c32(0), c32(intCacheSize),
+			r.forRange(i, c32(0), c32(intCacheSize),
 				Set(o, r.Call("alloc", c32(16))),
 				st(get(o), 0, c32(TInt|1<<8)),
 				I64Store(get(o), offInt, I64ExtendI32S(sub(get(i), c32(intCacheMin)))),
@@ -450,11 +455,11 @@ func elem(base Expr, off uint32, i Expr) Expr {
 }
 
 // forRange emits: for i = from; i < to; i++ { body }.
-func forRange(i Local, from, to Expr, body ...Expr) Expr {
+func (r *RT) forRange(i Local, from, to Expr, body ...Expr) Expr {
 	brk, cont := NewLabel(), NewLabel()
 	return Seq{
 		Set(i, from),
-		Block(brk, Loop(cont,
+		Block(brk, r.loop(cont,
 			BrIf(brk, ge(get(i), to)),
 			Seq(body),
 			Set(i, add(get(i), c32(1))),
@@ -464,11 +469,11 @@ func forRange(i Local, from, to Expr, body ...Expr) Expr {
 }
 
 // forRangeL is forRange with an explicit break label available to body.
-func forRangeL(i Local, from, to Expr, brk *Label, body ...Expr) Expr {
+func (r *RT) forRangeL(i Local, from, to Expr, brk *Label, body ...Expr) Expr {
 	cont := NewLabel()
 	return Seq{
 		Set(i, from),
-		Block(brk, Loop(cont,
+		Block(brk, r.loop(cont,
 			BrIf(brk, ge(get(i), to)),
 			Seq(body),
 			Set(i, add(get(i), c32(1))),
@@ -524,6 +529,7 @@ func (r *RT) registerCore() {
 		n := f.Param(0)
 		p, end, need, pages := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
 		f.Add(
+			r.chargeBytes(get(n)),
 			Set(p, GGet(r.Heap)),
 			Set(end, add(get(p), and(add(get(n), c32(7)), c32(-8)))),
 			If(I32LtU(get(end), get(p)), r.Fail("out of memory")),
@@ -556,13 +562,18 @@ func (r *RT) registerCore() {
 	// fail(msg string): records the error and traps.
 	r.define("fail", p1, r0, func(f *Func) {
 		msg := f.Param(0)
-		f.Add(GSet(r.ErrObj, get(msg)), GSet(r.CmpDepth, c32(0)))
+		f.Add(
+			GSet(r.ErrObj, get(msg)),
+			GSet(r.CmpDepth, c32(0)),
+			If(eqz(GGet(r.ErrCode)), GSet(r.ErrCode, c32(ErrStarlark))),
+		)
 		if r.Cfg.Command {
 			f.Add(
 				Drop(r.Call("write", c32(2), r.S("Error: "))),
 				Drop(r.Call("write", c32(2), get(msg))),
 				Drop(r.Call("write", c32(2), r.S("\n"))),
-				Call(r.procExit, c32(1)),
+				// The exit status is the error code.
+				Call(r.procExit, GGet(r.ErrCode)),
 			)
 		}
 		f.Add(Unreachable())
@@ -648,14 +659,14 @@ func (r *RT) registerCore() {
 			I32Store8(get(v), offFlags, or(I32Load8U(get(v), offFlags), c32(1))),
 			Set(t, tagOf(get(v))),
 			If(eq(get(t), c32(TTuple)),
-				forRange(i, c32(0), ld(get(v), offTupLen),
+				r.forRange(i, c32(0), ld(get(v), offTupLen),
 					r.Call("freeze", ld(elem(get(v), offTupElems, get(i)), 0)))),
 			If(eq(get(t), c32(TList)),
-				forRange(i, c32(0), ld(get(v), offListLen),
+				r.forRange(i, c32(0), ld(get(v), offListLen),
 					r.Call("freeze", ld(elem(ld(get(v), offListData), 0, get(i)), 0)))),
 			If(eq(get(t), c32(TDict)), Seq{
 				Set(n, ld(get(v), offDictUsed)),
-				forRange(i, c32(0), get(n),
+				r.forRange(i, c32(0), get(n),
 					r.Call("freeze", ld(add(ld(get(v), offDictEntries), mul(get(i), c32(12))), 4)),
 					r.Call("freeze", ld(add(ld(get(v), offDictEntries), mul(get(i), c32(12))), 8)),
 				),

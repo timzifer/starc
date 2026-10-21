@@ -64,8 +64,8 @@ func newTestRuntime(t testing.TB) wazero.Runtime {
 }
 
 // execute compiles src and runs it as a WASI command, with a deadline.
-func execute(t *testing.T, rt wazero.Runtime, name, src string) (string, string, error) {
-	bin, err := Compile(name, []byte(src), Options{Command: true, Names: true, Dialect: testDialect})
+func execute(t *testing.T, rt wazero.Runtime, name, src string, fuel bool) (string, string, error) {
+	bin, err := Compile(name, []byte(src), Options{Command: true, Names: true, Dialect: testDialect, Fuel: fuel})
 	if err != nil {
 		t.Fatalf("%s: compile: %v", name, err)
 	}
@@ -90,25 +90,36 @@ func TestConformance(t *testing.T) {
 		for _, c := range readChunks(t, file) {
 			t.Run(c.name, func(t *testing.T) {
 				want, werr := interpret(c.name, c.src)
-				got, stderr, gerr := execute(t, rt, c.name, c.src)
-				if werr != nil {
-					if gerr == nil {
-						t.Fatalf("interpreter failed with %v, compiled program succeeded with output:\n%s", werr, got)
-					}
-					// Only a Starlark error matches: a trap, stack overflow or
-					// deadline is a bug even where the interpreter fails.
-					var exit *sys.ExitError
-					if !errors.As(gerr, &exit) || exit.ExitCode() != 1 || !strings.HasPrefix(stderr, "Error: ") {
-						t.Fatalf("interpreter failed with %v, compiled program did not fail with a Starlark error: %v\nstderr: %s",
-							werr, gerr, stderr)
-					}
-				} else if gerr != nil {
-					t.Fatalf("compiled program failed: %v\nstderr: %s\noutput so far:\n%s", gerr, stderr, got)
-				}
-				if got != want {
-					t.Errorf("output mismatch\n--- interpreter ---\n%s--- compiled ---\n%s", want, got)
+				// Fuel metering (with an unlimited budget) must not change
+				// the behavior.
+				for _, fuel := range []bool{false, true} {
+					checkConformance(t, rt, c, want, werr, fuel)
 				}
 			})
 		}
+	}
+}
+
+// checkConformance compares the compiled program with the interpreter's
+// result.
+func checkConformance(t *testing.T, rt wazero.Runtime, c chunk, want string, werr error, fuel bool) {
+	t.Helper()
+	got, stderr, gerr := execute(t, rt, c.name, c.src, fuel)
+	if werr != nil {
+		if gerr == nil {
+			t.Fatalf("fuel=%v: interpreter failed with %v, compiled program succeeded with output:\n%s", fuel, werr, got)
+		}
+		// Only a Starlark error matches: a trap, stack overflow or
+		// deadline is a bug even where the interpreter fails.
+		var exit *sys.ExitError
+		if !errors.As(gerr, &exit) || exit.ExitCode() != 1 || !strings.HasPrefix(stderr, "Error: ") {
+			t.Fatalf("fuel=%v: interpreter failed with %v, compiled program did not fail with a Starlark error: %v\nstderr: %s",
+				fuel, werr, gerr, stderr)
+		}
+	} else if gerr != nil {
+		t.Fatalf("fuel=%v: compiled program failed: %v\nstderr: %s\noutput so far:\n%s", fuel, gerr, stderr, got)
+	}
+	if got != want {
+		t.Errorf("fuel=%v: output mismatch\n--- interpreter ---\n%s--- compiled ---\n%s", fuel, want, got)
 	}
 }

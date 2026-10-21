@@ -47,9 +47,9 @@ func dsetNd(d, v Expr) Expr    { return st(d, decNd, v) }
 func dsetDp(d, v Expr) Expr    { return st(d, decDp, v) }
 func dsetTrunc(d, v Expr) Expr { return st(d, decTrunc, v) }
 func i64(v Expr) Expr          { return I64ExtendI32U(v) }
-func whileLoop(cond Expr, body ...Expr) Expr {
+func (r *RT) whileLoop(cond Expr, body ...Expr) Expr {
 	brk, cont := NewLabel(), NewLabel()
-	return Block(brk, Loop(cont, BrIf(brk, not(cond)), Seq(body), Br(cont)))
+	return Block(brk, r.loop(cont, BrIf(brk, not(cond)), Seq(body), Br(cont)))
 }
 
 func (r *RT) registerDecimal() {
@@ -57,7 +57,7 @@ func (r *RT) registerDecimal() {
 	r.define("dec_trim", p1, r0, func(f *Func) {
 		d := f.Param(0)
 		f.Add(
-			whileLoop(and(gt(dnd(get(d)), c32(0)), eqz(ddig(get(d), sub(dnd(get(d)), c32(1))))),
+			r.whileLoop(and(gt(dnd(get(d)), c32(0)), eqz(ddig(get(d), sub(dnd(get(d)), c32(1))))),
 				dsetNd(get(d), sub(dnd(get(d)), c32(1)))),
 			If(eqz(dnd(get(d))), dsetDp(get(d), c32(0))),
 		)
@@ -69,9 +69,9 @@ func (r *RT) registerDecimal() {
 		n, i := f.Local(I32), f.Local(I32)
 		f.Add(
 			Set(t, Get(v)),
-			whileLoop(I64Ne(get(t), I64c(0)), Set(t, I64DivU(get(t), I64c(10))), Set(n, add(get(n), c32(1)))),
+			r.whileLoop(I64Ne(get(t), I64c(0)), Set(t, I64DivU(get(t), I64c(10))), Set(n, add(get(n), c32(1)))),
 			Set(i, get(n)),
-			whileLoop(gt(get(i), c32(0)),
+			r.whileLoop(gt(get(i), c32(0)),
 				Set(i, sub(get(i), c32(1))),
 				dset(get(d), get(i), I32WrapI64(I64RemU(Get(v), I64c(10)))),
 				Set(v, I64DivU(Get(v), I64c(10))),
@@ -92,11 +92,11 @@ func (r *RT) registerDecimal() {
 		f.Add(
 			Set(kk, i64(get(k))),
 			// Read digits until the value is at least 2^k.
-			Block(brk, Loop(cont,
+			Block(brk, r.loop(cont,
 				BrIf(brk, I64Ne(shifted(), I64c(0))),
 				If(ge(get(rd), dnd(get(d))), Seq{
 					If(I64Eqz(get(n)), Seq{dsetNd(get(d), c32(0)), Return(nil)}),
-					whileLoop(I64Eqz(shifted()),
+					r.whileLoop(I64Eqz(shifted()),
 						Set(n, I64Mul(get(n), I64c(10))),
 						Set(rd, add(get(rd), c32(1))),
 					),
@@ -109,7 +109,7 @@ func (r *RT) registerDecimal() {
 			dsetDp(get(d), sub(ddp(get(d)), sub(get(rd), c32(1)))),
 			Set(mask, I64Sub(I64Shl(I64c(1), get(kk)), I64c(1))),
 			// Pick up a digit, put down a digit.
-			whileLoop(lt(get(rd), dnd(get(d))),
+			r.whileLoop(lt(get(rd), dnd(get(d))),
 				Set(dig, I32WrapI64(shifted())),
 				Set(n, I64And(get(n), get(mask))),
 				dset(get(d), get(w), get(dig)),
@@ -118,7 +118,7 @@ func (r *RT) registerDecimal() {
 				Set(rd, add(get(rd), c32(1))),
 			),
 			// Put down extra digits.
-			whileLoop(I64Ne(get(n), I64c(0)),
+			r.whileLoop(I64Ne(get(n), I64c(0)),
 				Set(dig, I32WrapI64(shifted())),
 				Set(n, I64And(get(n), get(mask))),
 				IfElse(lt(get(w), c32(decCap)), []Expr{
@@ -152,20 +152,20 @@ func (r *RT) registerDecimal() {
 			Set(delta, add(I32DivU(mul(get(k), c32(30103)), c32(100000)), c32(1))),
 			Set(rd, dnd(get(d))),
 			Set(w, add(dnd(get(d)), get(delta))),
-			whileLoop(gt(get(rd), c32(0)),
+			r.whileLoop(gt(get(rd), c32(0)),
 				Set(rd, sub(get(rd), c32(1))),
 				Set(n, I64Add(get(n), I64Shl(i64(ddig(get(d), get(rd))), i64(get(k))))),
 				put(),
 			),
-			whileLoop(I64Ne(get(n), I64c(0)), put()),
+			r.whileLoop(I64Ne(get(n), I64c(0)), put()),
 			// Digits now occupy [w, nd+delta).
 			Set(delta, sub(get(delta), get(w))),
-			If(get(w), MemoryCopy(add(get(d), c32(decDigits)), add(add(get(d), c32(decDigits)), get(w)),
+			If(get(w), r.memcopy(add(get(d), c32(decDigits)), add(add(get(d), c32(decDigits)), get(w)),
 				add(dnd(get(d)), get(delta)))),
 			dsetNd(get(d), add(dnd(get(d)), get(delta))),
 			dsetDp(get(d), add(ddp(get(d)), get(delta))),
 			If(gt(dnd(get(d)), c32(decCap)), Seq{
-				forRange(i, c32(decCap), dnd(get(d)), If(ddig(get(d), get(i)), dsetTrunc(get(d), c32(1)))),
+				r.forRange(i, c32(decCap), dnd(get(d)), If(ddig(get(d), get(i)), dsetTrunc(get(d), c32(1)))),
 				dsetNd(get(d), c32(decCap)),
 			}),
 			r.Call("dec_trim", get(d)),
@@ -177,13 +177,13 @@ func (r *RT) registerDecimal() {
 		f.Add(
 			If(eqz(dnd(get(d))), Return(nil)),
 			If(gt(get(k), c32(0)), Seq{
-				whileLoop(gt(get(k), c32(decMaxShift)),
+				r.whileLoop(gt(get(k), c32(decMaxShift)),
 					r.Call("dec_lshift", get(d), c32(decMaxShift)),
 					Set(k, sub(get(k), c32(decMaxShift)))),
 				r.Call("dec_lshift", get(d), get(k)),
 			}),
 			If(lt(get(k), c32(0)), Seq{
-				whileLoop(lt(get(k), c32(-decMaxShift)),
+				r.whileLoop(lt(get(k), c32(-decMaxShift)),
 					r.Call("dec_rshift", get(d), c32(decMaxShift)),
 					Set(k, add(get(k), c32(decMaxShift)))),
 				r.Call("dec_rshift", get(d), sub(c32(0), get(k))),
@@ -217,7 +217,7 @@ func (r *RT) registerDecimal() {
 		f.Add(
 			If(or(lt(get(nd), c32(0)), ge(get(nd), dnd(get(d)))), Return(nil)),
 			Set(i, get(nd)),
-			whileLoop(gt(get(i), c32(0)),
+			r.whileLoop(gt(get(i), c32(0)),
 				Set(i, sub(get(i), c32(1))),
 				If(lt(ddig(get(d), get(i)), c32(9)), Seq{
 					dset(get(d), get(i), add(ddig(get(d), get(i)), c32(1))),
@@ -247,11 +247,11 @@ func (r *RT) registerDecimal() {
 		n := f.Local(I64)
 		f.Add(
 			If(gt(ddp(get(d)), c32(20)), Return(I64c(-1))),
-			whileLoop(and(lt(get(i), ddp(get(d))), lt(get(i), dnd(get(d)))),
+			r.whileLoop(and(lt(get(i), ddp(get(d))), lt(get(i), dnd(get(d)))),
 				Set(n, I64Add(I64Mul(get(n), I64c(10)), i64(ddig(get(d), get(i))))),
 				Set(i, add(get(i), c32(1))),
 			),
-			whileLoop(lt(get(i), ddp(get(d))),
+			r.whileLoop(lt(get(i), ddp(get(d))),
 				Set(n, I64Mul(get(n), I64c(10))),
 				Set(i, add(get(i), c32(1))),
 			),
@@ -282,12 +282,12 @@ func (r *RT) registerDecimal() {
 			If(gt(ddp(get(d)), c32(310)), overflow),
 			If(lt(ddp(get(d)), c32(-330)), zero),
 			// Scale by powers of two until the value is in [0.5, 1).
-			whileLoop(gt(ddp(get(d)), c32(0)),
+			r.whileLoop(gt(ddp(get(d)), c32(0)),
 				Set(n, pow(ddp(get(d)))),
 				r.Call("dec_shift", get(d), sub(c32(0), get(n))),
 				Set(exp, add(get(exp), get(n))),
 			),
-			whileLoop(or(lt(ddp(get(d)), c32(0)), and(eqz(ddp(get(d))), lt(ddig(get(d), c32(0)), c32(5)))),
+			r.whileLoop(or(lt(ddp(get(d)), c32(0)), and(eqz(ddp(get(d))), lt(ddig(get(d), c32(0)), c32(5)))),
 				Set(n, pow(sub(c32(0), ddp(get(d))))),
 				r.Call("dec_shift", get(d), get(n)),
 				Set(exp, sub(get(exp), get(n))),
@@ -357,7 +357,7 @@ func (r *RT) registerDecimal() {
 			// With an even mantissa the halfway points round to x.
 			Set(inclusive, I64Eqz(I64And(get(mant), I64c(1)))),
 			// Find the shortest prefix within (lower, upper).
-			Block(brk, Loop(cont,
+			Block(brk, r.loop(cont,
 				Set(mi, add(sub(get(ui), ddp(upper)), ddp(d))),
 				BrIf(brk, ge(get(mi), dnd(d))),
 				Set(li, add(sub(get(ui), ddp(upper)), ddp(lower))),

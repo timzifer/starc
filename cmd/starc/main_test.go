@@ -95,3 +95,18 @@ func TestModuleVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestFuelFlags(t *testing.T) {
+	src := "def f(n):\n    return sorted(range(n, 0, -1))[:2]\n"
+	code, stdout, stderr := cli(t, src, "run", "-fuel", "-", "f", "100")
+	if code != 0 || stdout != "[1,2]\n" || !strings.HasPrefix(stderr, "fuel used: ") {
+		t.Errorf("-fuel: code %d stdout %q stderr %q", code, stdout, stderr)
+	}
+	code, _, stderr = cli(t, src, "run", "-budget", "3000", "-", "f", "100")
+	if code != 1 || stderr != "fuel used: 3000\nstarc: fuel exhausted\n" {
+		t.Errorf("-budget: code %d stderr %q", code, stderr)
+	}
+	if code, _, _ := cli(t, src, "run", "-budget", "-1", "-", "f", "1"); code != 2 {
+		t.Errorf("negative budget: code %d", code)
+	}
+}

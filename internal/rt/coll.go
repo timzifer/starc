@@ -41,8 +41,8 @@ func (r *RT) registerColl() {
 		t := f.Local(I32)
 		f.Add(
 			Set(t, r.Call("tuple_new", add(ld(get(a), 4), ld(get(b), 4)))),
-			MemoryCopy(add(get(t), c32(offTupElems)), add(get(a), c32(offTupElems)), I32Shl(ld(get(a), 4), c32(2))),
-			MemoryCopy(elem(get(t), offTupElems, ld(get(a), 4)), add(get(b), c32(offTupElems)), I32Shl(ld(get(b), 4), c32(2))),
+			r.memcopy(add(get(t), c32(offTupElems)), add(get(a), c32(offTupElems)), I32Shl(ld(get(a), 4), c32(2))),
+			r.memcopy(elem(get(t), offTupElems, ld(get(a), 4)), add(get(b), c32(offTupElems)), I32Shl(ld(get(b), 4), c32(2))),
 			get(t),
 		)
 	})
@@ -54,7 +54,7 @@ func (r *RT) registerColl() {
 			If(isTag(get(v), TTuple), Return(get(v))),
 			Set(s, r.Call("iter_seq", get(v))),
 			Set(t, r.Call("tuple_new", ld(get(s), 4))),
-			MemoryCopy(add(get(t), c32(offTupElems)), r.Call("seq_base", get(s)), I32Shl(ld(get(s), 4), c32(2))),
+			r.memcopy(add(get(t), c32(offTupElems)), r.Call("seq_base", get(s)), I32Shl(ld(get(s), 4), c32(2))),
 			get(t),
 		)
 	})
@@ -77,7 +77,7 @@ func (r *RT) registerColl() {
 		l := f.Local(I32)
 		f.Add(
 			Set(l, r.Call("list_new", ld(get(t), offTupLen))),
-			MemoryCopy(ld(get(l), offListData), add(get(t), c32(offTupElems)), I32Shl(ld(get(t), offTupLen), c32(2))),
+			r.memcopy(ld(get(l), offListData), add(get(t), c32(offTupElems)), I32Shl(ld(get(t), offTupLen), c32(2))),
 			st(get(l), offListLen, ld(get(t), offTupLen)),
 			get(l),
 		)
@@ -90,7 +90,7 @@ func (r *RT) registerColl() {
 			Set(c, I32Shl(ld(get(l), offListCap), c32(1))),
 			If(lt(get(c), get(n)), Set(c, get(n))),
 			Set(d, r.Call("alloc", I32Shl(get(c), c32(2)))),
-			MemoryCopy(get(d), ld(get(l), offListData), I32Shl(ld(get(l), offListLen), c32(2))),
+			r.memcopy(get(d), ld(get(l), offListData), I32Shl(ld(get(l), offListLen), c32(2))),
 			st(get(l), offListData, get(d)),
 			st(get(l), offListCap, get(c)),
 		)
@@ -120,8 +120,8 @@ func (r *RT) registerColl() {
 		l := f.Local(I32)
 		f.Add(
 			Set(l, r.Call("list_new", add(ld(get(a), 4), ld(get(b), 4)))),
-			MemoryCopy(ld(get(l), offListData), ld(get(a), offListData), I32Shl(ld(get(a), 4), c32(2))),
-			MemoryCopy(elem(ld(get(l), offListData), 0, ld(get(a), 4)), ld(get(b), offListData), I32Shl(ld(get(b), 4), c32(2))),
+			r.memcopy(ld(get(l), offListData), ld(get(a), offListData), I32Shl(ld(get(a), 4), c32(2))),
+			r.memcopy(elem(ld(get(l), offListData), 0, ld(get(a), 4)), ld(get(b), offListData), I32Shl(ld(get(b), 4), c32(2))),
 			st(get(l), offListLen, add(ld(get(a), 4), ld(get(b), 4))),
 			get(l),
 		)
@@ -134,7 +134,7 @@ func (r *RT) registerColl() {
 			r.Call("list_check_mut", get(l)),
 			Set(s, r.Call("iter_begin", get(v))),
 			Set(n, r.Call("seq_len", get(s))),
-			forRange(i, c32(0), get(n), r.Call("list_append_raw", get(l), r.Call("seq_at", get(s), get(i)))),
+			r.forRange(i, c32(0), get(n), r.Call("list_append_raw", get(l), r.Call("seq_at", get(s), get(i)))),
 			r.Call("iter_end", get(v)),
 		)
 	})
@@ -173,14 +173,14 @@ func (r *RT) registerColl() {
 			Set(n, I32WrapI64(get(x))),
 			If(eq(get(t), c32(TString)), Seq{
 				Set(res, r.Call("str_new", mul(get(sz), get(n)))),
-				forRange(i, c32(0), get(n),
-					MemoryCopy(add(sbytes(get(res)), mul(get(i), get(sz))), sbytes(get(s)), get(sz))),
+				r.forRange(i, c32(0), get(n),
+					r.memcopy(add(sbytes(get(res)), mul(get(i), get(sz))), sbytes(get(s)), get(sz))),
 				Return(get(res)),
 			}),
 			Set(res, r.Call("tuple_new", mul(get(sz), get(n)))),
 			Set(base, r.Call("seq_base", get(s))),
-			forRange(i, c32(0), get(n),
-				MemoryCopy(elem(get(res), offTupElems, mul(get(i), get(sz))), get(base), I32Shl(get(sz), c32(2)))),
+			r.forRange(i, c32(0), get(n),
+				r.memcopy(elem(get(res), offTupElems, mul(get(i), get(sz))), get(base), I32Shl(get(sz), c32(2)))),
 			If(eq(get(t), c32(TList)), Return(r.Call("list_of", get(res)))),
 			get(res),
 		)
@@ -204,7 +204,7 @@ func (r *RT) registerColl() {
 			If(eqz(ld(get(d), offDictICap)), Return(c32(0))),
 			Set(mask, sub(ld(get(d), offDictICap), c32(1))),
 			Set(i, and(get(h), get(mask))),
-			Block(brk, Loop(cont,
+			Block(brk, r.loop(cont,
 				Set(s, ld(elem(ld(get(d), offDictIndex), 0, get(i)), 0)),
 				BrIf(brk, eqz(get(s))),
 				Set(e, add(ld(get(d), offDictEntries), mul(sub(get(s), c32(1)), c32(12)))),
@@ -225,7 +225,7 @@ func (r *RT) registerColl() {
 			Set(idx, ld(get(d), offDictIndex)),
 			Set(mask, sub(ld(get(d), offDictICap), c32(1))),
 			Set(i, and(get(h), get(mask))),
-			Block(brk, Loop(cont,
+			Block(brk, r.loop(cont,
 				BrIf(brk, eqz(ld(elem(get(idx), 0, get(i)), 0))),
 				Set(i, and(add(get(i), c32(1)), get(mask))),
 				Br(cont),
@@ -245,11 +245,11 @@ func (r *RT) registerColl() {
 			st(get(d), offDictCap, get(c)),
 			st(get(d), offDictICap, I32Shl(get(c), c32(1))),
 			st(get(d), offDictIndex, r.Call("alloc", I32Shl(get(c), c32(3)))),
-			forRange(i, c32(0), get(oldUsed),
+			r.forRange(i, c32(0), get(oldUsed),
 				Set(e, add(get(old), mul(get(i), c32(12)))),
 				If(ld(get(e), 4), Seq{
 					Set(ne2, add(get(ents), mul(get(n), c32(12)))),
-					MemoryCopy(get(ne2), get(e), c32(12)),
+					r.memcopy(get(ne2), get(e), c32(12)),
 					Set(n, add(get(n), c32(1))),
 					r.Call("dict_index_insert", get(d), get(n), ld(get(e), 0)),
 				}),
@@ -337,7 +337,7 @@ func (r *RT) registerColl() {
 		l, i, e := f.Local(I32), f.Local(I32), f.Local(I32)
 		f.Add(
 			Set(l, r.Call("list_new", ld(get(d), offDictLen))),
-			forRange(i, c32(0), ld(get(d), offDictUsed),
+			r.forRange(i, c32(0), ld(get(d), offDictUsed),
 				Set(e, add(ld(get(d), offDictEntries), mul(get(i), c32(12)))),
 				If(ld(get(e), 4),
 					r.Call("list_append_raw", get(l),
@@ -353,7 +353,7 @@ func (r *RT) registerColl() {
 		d, o := f.Param(0), f.Param(1)
 		i, e := f.Local(I32), f.Local(I32)
 		f.Add(
-			forRange(i, c32(0), ld(get(o), offDictUsed),
+			r.forRange(i, c32(0), ld(get(o), offDictUsed),
 				Set(e, add(ld(get(o), offDictEntries), mul(get(i), c32(12)))),
 				If(ld(get(e), 4), r.Call("dict_set", get(d), ld(get(e), 4), ld(get(e), 8))),
 			),
@@ -589,7 +589,7 @@ func (r *RT) registerColl() {
 			// Indices are tracked in i64: lo + k*step stays in [-1, n] for
 			// every k < cnt, so the index never overflows.
 			Set(i, get(lo)),
-			forRange(k, c32(0), get(cnt),
+			r.forRange(k, c32(0), get(cnt),
 				IfElse(eq(get(t), c32(TString)), []Expr{
 					I32Store8(add(get(base), get(k)), 0, I32Load8U(add(sbytes(get(x)), I32WrapI64(get(i))), 0)),
 				}, []Expr{
@@ -628,7 +628,7 @@ func (r *RT) registerColl() {
 			If(or(eq(get(t), c32(TList)), eq(get(t), c32(TTuple))), Seq{
 				Set(n, ld(get(c), 4)),
 				Set(base, r.Call("seq_base", get(c))),
-				forRange(i, c32(0), get(n),
+				r.forRange(i, c32(0), get(n),
 					If(r.Call("eq", ld(elem(get(base), 0, get(i)), 0), get(x)), Return(c32(1)))),
 				Return(c32(0)),
 			}),

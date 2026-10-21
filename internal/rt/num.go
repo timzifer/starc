@@ -224,7 +224,7 @@ func (r *RT) registerNum() {
 				// subnormal: shift the leading one up to bit 52
 				Set(u, I64And(Get(u), I64c(mant))),
 				Set(e, I64c(1)),
-				Block(brk, Loop(cont,
+				Block(brk, r.loop(cont,
 					BrIf(brk, I64Ne(I64And(Get(u), I64c(1<<52)), I64c(0))),
 					Set(u, I64Shl(Get(u), I64c(1))),
 					Set(e, I64Sub(Get(e), I64c(1))),
@@ -249,7 +249,7 @@ func (r *RT) registerNum() {
 			normalize(ux, ex),
 			normalize(uy, ey),
 			// long division: reduce ux modulo uy one exponent step at a time
-			Block(brk, Loop(cont,
+			Block(brk, r.loop(cont,
 				BrIf(brk, I64LeS(Get(ex), Get(ey))),
 				Set(d, I64Sub(Get(ux), Get(uy))),
 				If(I64GeS(Get(d), I64c(0)), Seq{
@@ -266,7 +266,7 @@ func (r *RT) registerNum() {
 				Set(ux, Get(d)),
 			}),
 			// renormalize so the leading bit is at position 52
-			Block(brk, Loop(cont,
+			Block(brk, r.loop(cont,
 				BrIf(brk, I64Ne(I64And(Get(ux), I64c(1<<52)), I64c(0))),
 				Set(ux, I64Shl(Get(ux), I64c(1))),
 				Set(ex, I64Sub(Get(ex), I64c(1))),
@@ -332,7 +332,7 @@ func (r *RT) registerNum() {
 				Set(pa, r.Call("seq_base", get(a))), Set(pb, r.Call("seq_base", get(b))),
 				Set(n, Select(get(la), get(lb), lt(get(la), get(lb)))),
 				If(get(n), r.Call("cmp_enter")),
-				forRangeL(i, c32(0), get(n), brk,
+				r.forRangeL(i, c32(0), get(n), brk,
 					If(not(r.Call("eq", ld(elem(get(pa), 0, get(i)), 0), ld(elem(get(pb), 0, get(i)), 0))), Seq{
 						Set(c, r.Call("cmp", ld(elem(get(pa), 0, get(i)), 0), ld(elem(get(pb), 0, get(i)), 0), get(opn))),
 						r.Call("cmp_leave"),
@@ -388,7 +388,7 @@ func (r *RT) registerNum() {
 				If(eqz(get(n)), Return(c32(1))),
 				Set(pa, r.Call("seq_base", get(a))), Set(pb, r.Call("seq_base", get(b))),
 				r.Call("cmp_enter"),
-				forRange(i, c32(0), get(n),
+				r.forRange(i, c32(0), get(n),
 					If(not(r.Call("eq", ld(elem(get(pa), 0, get(i)), 0), ld(elem(get(pb), 0, get(i)), 0))),
 						Seq{r.Call("cmp_leave"), Return(c32(0))})),
 				r.Call("cmp_leave"),
@@ -397,7 +397,7 @@ func (r *RT) registerNum() {
 			If(eq(get(ta), c32(TDict)), Seq{
 				If(ne(ld(get(a), offDictLen), ld(get(b), offDictLen)), Return(c32(0))),
 				If(eqz(ld(get(a), offDictLen)), Return(c32(1))),
-				forRange(i, c32(0), ld(get(a), offDictUsed),
+				r.forRange(i, c32(0), ld(get(a), offDictUsed),
 					Set(ent, add(ld(get(a), offDictEntries), mul(get(i), c32(12)))),
 					If(ld(get(ent), 4), Seq{
 						// Key lookup is a fresh comparison, as in Starlark.
@@ -451,7 +451,7 @@ func (r *RT) registerNum() {
 			If(eq(get(t), c32(TBool)), Return(add(ld(get(v), offBool), c32(0x5a5a)))),
 			If(eq(get(t), c32(TTuple)), Seq{
 				Set(h, c32(0x345678)),
-				forRange(i, c32(0), ld(get(v), offTupLen),
+				r.forRange(i, c32(0), ld(get(v), offTupLen),
 					Set(h, add(mul(I32Xor(get(h), r.Call("hash", ld(elem(get(v), offTupElems, get(i)), 0))), c32(1000003)), get(i)))),
 				Return(get(h)),
 			}),
