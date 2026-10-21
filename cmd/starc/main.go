@@ -96,6 +96,7 @@ type buildOpts struct {
 	host    string
 	noWASI  bool
 	fuel    bool
+	finite  bool
 	budget  int64
 	limits  struct {
 		pages, input, result uint
@@ -120,6 +121,7 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 	fs.IntVar(&o.limits.depth, "max-depth", 0, "maximum call depth (default 500)")
 	fs.UintVar(&o.limits.input, "max-input", 0, "maximum size of the encoded arguments of a call in bytes (default unlimited)")
 	fs.UintVar(&o.limits.result, "max-result", 0, "maximum size of the encoded result of a call in bytes (default unlimited)")
+	fs.BoolVar(&o.finite, "finite-floats", false, "make NaN and infinite floats errors")
 	fs.BoolVar(&o.dialect.While, "while", false, "allow while loops")
 	fs.BoolVar(&o.dialect.TopLevelControl, "toplevel-control", false, "allow if/for/while at top level")
 	fs.BoolVar(&o.dialect.GlobalReassign, "global-reassign", false, "allow reassignment of top-level names")
@@ -132,7 +134,7 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 }
 
 func (o *buildOpts) options() *starc.Options {
-	opts := &starc.Options{NoNames: o.noNames, NoWASI: o.noWASI, Fuel: o.fuel || o.budget > 0, Dialect: o.dialect,
+	opts := &starc.Options{NoNames: o.noNames, NoWASI: o.noWASI, Fuel: o.fuel || o.budget > 0, FiniteFloats: o.finite, Dialect: o.dialect,
 		MaxMemoryPages: uint32(min(o.limits.pages, 1<<32-1)), MaxCallDepth: o.limits.depth,
 		MaxInputBytes: uint32(min(o.limits.input, 1<<32-1)), MaxResultBytes: uint32(min(o.limits.result, 1<<32-1))}
 	if o.command {

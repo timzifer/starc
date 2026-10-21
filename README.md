@@ -5,6 +5,7 @@
 </p>
 
 [![CI](https://github.com/timzifer/starc/actions/workflows/ci.yml/badge.svg)](https://github.com/timzifer/starc/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/timzifer/starc/badges/coverage.json)](https://github.com/timzifer/starc/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/timzifer/starc.svg)](https://pkg.go.dev/github.com/timzifer/starc)
 [![Release](https://img.shields.io/github/v/release/timzifer/starc?sort=semver)](https://github.com/timzifer/starc/releases)
 [![Go version](https://img.shields.io/github/go-mod/go-version/timzifer/starc)](go.mod)
@@ -52,7 +53,7 @@ starc run examples/wordcount.star count_words "a b a" 1
 
 Flags: `-o`, `-command`, `-export a,b`, `-no-names`, `-host ctx.entity,now`,
 `-no-wasi`, `-fuel`, `-budget N` (run), the limits `-max-pages`,
-`-max-depth`, `-max-input`, `-max-result`, and the dialect flags
+`-max-depth`, `-max-input`, `-max-result`, `-finite-floats`, and the dialect flags
 `-while`, `-toplevel-control`, `-global-reassign`, `-recursion`. Run
 `starc help` for details.
 

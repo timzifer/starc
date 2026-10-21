@@ -66,6 +66,8 @@ type Meta struct {
 	// Limits are the hard limits compiled into the module. They are zero
 	// for modules built before limits were recorded.
 	Limits Limits `json:"limits"`
+	// FiniteFloats reports a module in which NaN and infinities are errors.
+	FiniteFloats bool `json:"finite_floats,omitempty"`
 }
 
 // Limits are the hard limits of a module (see starc.Options).

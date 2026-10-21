@@ -143,6 +143,8 @@ type Config struct {
 	NoWASI bool
 	// Fuel enables fuel metering (see fuel.go).
 	Fuel bool
+	// FiniteFloats makes the creation of NaN or an infinity an error.
+	FiniteFloats bool
 	// MaxCallDepth is the maximum depth of calls and of recursion into
 	// nested values (see limits.go).
 	MaxCallDepth int
@@ -350,8 +352,15 @@ func (r *RT) Int(v int64) uint32 {
 	return a
 }
 
+// CanonicalNaN is the bit pattern of every NaN value: the positive quiet
+// NaN with an empty payload (a canonical NaN in WebAssembly terms).
+const CanonicalNaN = 0x7ff8000000000000
+
 // Float returns the address of a static float object.
 func (r *RT) Float(v float64) uint32 {
+	if v != v {
+		v = math.Float64frombits(CanonicalNaN)
+	}
 	k := math.Float64bits(v)
 	if a, ok := r.floats[k]; ok {
 		return a

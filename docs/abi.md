@@ -183,7 +183,7 @@ little-endian. Values need not be aligned.
 | 1 | `False` | — |
 | 2 | `True` | — |
 | 3 | `int` | 8 bytes, two's complement int64 |
-| 4 | `float` | 8 bytes, IEEE 754 binary64 |
+| 4 | `float` | 8 bytes, IEEE 754 binary64; a NaN is always `0x7ff8000000000000` |
 | 5 | `string` | u32 byte length, UTF-8 bytes |
 | 6 | `list` | u32 count, then `count` values |
 | 7 | `tuple` | u32 count, then `count` values |

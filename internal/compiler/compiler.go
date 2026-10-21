@@ -43,6 +43,8 @@ type Options struct {
 	HostCost map[string]int64
 	// Fuel enables fuel metering.
 	Fuel bool
+	// FiniteFloats makes NaN and infinite floats errors.
+	FiniteFloats bool
 	// MaxMemoryPages is the maximum memory size in 64 KiB pages; 0 means
 	// rt.MaxMemoryPages.
 	MaxMemoryPages uint32
@@ -137,7 +139,7 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 	if m.MaxPages == 0 {
 		m.MaxPages = rt.MaxMemoryPages
 	}
-	r := rt.New(m, rt.Config{Command: opts.Command, NoWASI: opts.NoWASI, Fuel: opts.Fuel,
+	r := rt.New(m, rt.Config{Command: opts.Command, NoWASI: opts.NoWASI, Fuel: opts.Fuel, FiniteFloats: opts.FiniteFloats,
 		MaxCallDepth: opts.MaxCallDepth, MaxInputBytes: opts.MaxInputBytes, MaxResultBytes: opts.MaxResultBytes})
 	c.m, c.r = m, r
 
@@ -283,9 +285,10 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		NoWASI  bool          `json:"no_wasi,omitempty"`
 		Fuel    *rt.FuelTable `json:"fuel,omitempty"`
 		Limits  rt.Limits     `json:"limits"`
+		Finite  bool          `json:"finite_floats,omitempty"`
 	}{1, map[bool]string{true: "command", false: "reactor"}[opts.Command], meta, hostFuncs, opts.NoWASI, c.fuelTable(),
 		rt.Limits{MemoryPages: int(m.MaxPages), CallDepth: r.Cfg.MaxCallDepth,
-			InputBytes: int(opts.MaxInputBytes), ResultBytes: int(opts.MaxResultBytes)}})
+			InputBytes: int(opts.MaxInputBytes), ResultBytes: int(opts.MaxResultBytes)}, opts.FiniteFloats})
 	m.Customs = append(m.Customs, Custom{Name: MetaSection, Payload: payload})
 
 	return m.Encode()
