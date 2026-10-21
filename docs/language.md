@@ -69,6 +69,24 @@ and `dir`, and modules are unhashable. See
 * bytes literals and the `bytes` type
 * integer literals that do not fit in 64 bits
 
+### Floats and NaN
+
+The bit pattern of a NaN produced by WebAssembly arithmetic differs
+between platforms (and between operations), and it is observable: it
+feeds the hash of dict keys and appears in the host encoding. starc
+therefore canonicalizes NaN where it is created. Every float value is
+boxed by a single runtime function, and that function replaces any NaN
+(from arithmetic, `float()`, conversions or the host) with the positive
+quiet NaN `0x7ff8000000000000`. This costs one comparison per float value
+created. As a result, every NaN hashes, compares and encodes identically
+on every platform, and NaN dict keys from different sources find each
+other (NaN equals itself in Starlark).
+
+With `Options.FiniteFloats` (`-finite-floats`), creating NaN or an
+infinity, including `float("nan")`, `float("inf")`, overflowing
+arithmetic and such values passed in by the host, fails with
+`non-finite float value` instead.
+
 ## Deviations from go.starlark.net
 
 * **Integers are 64-bit.** Arithmetic that overflows is a run-time error

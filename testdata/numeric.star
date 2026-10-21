@@ -95,3 +95,14 @@ for i in range(8):
     b = (b,)
     b = [b[0]]
 print(a == b, a < [[2]], {"k": a} == {"k": b})
+---
+# NaN from different operations behaves the same.
+inf = float("inf")
+n = inf - inf
+print(n, -n, n == n, n != n, n < 1.0, n > 1.0, n >= inf, [n] == [n], (n,) == (0.0 * inf,))
+print(sorted([3.0, n, 1.0, -inf, 0.0 * inf]))
+print(str(float("nan")), repr(0.0 * inf), inf / inf, abs(n), float("-nan"))
+print(min([n, 1.0]), max([n, 1.0]), min([1.0, n]), max([1.0, n]))
+d = {n: 1}
+print(d[n], n in d, len(d))
+print(int(1.0) if n != n else "never", type(n), bool(n))

@@ -51,8 +51,20 @@ func (r *RT) registerNum() {
 			get(o),
 		)
 	})
+	// float(x) -> float object. Every float value is created here, so this
+	// is where NaN is canonicalized: the bits of a NaN differ between
+	// platforms and operations, and they are observable through hashing
+	// and the host encoding. With FiniteFloats, NaN and infinities are
+	// errors instead.
 	r.define("float", pf, r1, func(f *Func) {
+		x := f.Param(0)
 		o := f.Local(I32)
+		if r.Cfg.FiniteFloats {
+			// x - x is NaN exactly for NaN and the infinities.
+			f.Add(If(F64Ne(F64Sub(Get(x), Get(x)), F64c(0)), r.Fail("non-finite float value")))
+		} else {
+			f.Add(If(F64Ne(Get(x), Get(x)), Set(x, F64ReinterpI64(I64c(CanonicalNaN)))))
+		}
 		f.Add(
 			Set(o, r.Call("alloc", c32(16))),
 			st(get(o), 0, c32(TFloat)),

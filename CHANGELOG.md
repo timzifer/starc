@@ -8,6 +8,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+* `Options.FiniteFloats` (`-finite-floats`) makes creating NaN or an
+  infinity a Starlark error (`non-finite float value`).
 * Hard limits: `Options.MaxMemoryPages` (`-max-pages`, default 65535)
   is declared in the module and allocating beyond it fails with
   `out of memory`. `Options.MaxCallDepth` (`-max-depth`, default 500)
@@ -61,6 +63,9 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+* NaN is canonicalized to `0x7ff8000000000000` wherever a float is
+  created, so NaN values hash, compare and encode identically on every
+  platform, whichever operation produced them.
 * Encoding a value of 2 GiB or more for the host (such as a list that
   repeats a large string) fails with an error instead of overflowing
   the size computation.

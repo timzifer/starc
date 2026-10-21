@@ -85,6 +85,12 @@ type Options struct {
 	// MaxInputBytes and MaxResultBytes limit the encoded arguments and the
 	// encoded result of an exported call (code 5); 0 means no limit.
 	MaxInputBytes, MaxResultBytes uint32
+	// FiniteFloats makes every operation that would create NaN or an
+	// infinity fail with "non-finite float value", including float("nan"),
+	// overflowing arithmetic and such values passed in by the host. Without
+	// it, NaN is always canonicalized to a single bit pattern (see
+	// docs/language.md).
+	FiniteFloats bool
 }
 
 // maxCallDepth bounds Options.MaxCallDepth; no engine supports deeper
@@ -175,6 +181,7 @@ func Compile(filename string, src []byte, opts *Options) ([]byte, error) {
 		MaxCallDepth:   opts.MaxCallDepth,
 		MaxInputBytes:  opts.MaxInputBytes,
 		MaxResultBytes: opts.MaxResultBytes,
+		FiniteFloats:   opts.FiniteFloats,
 		Dialect: syntax.FileOptions{
 			While:           opts.Dialect.While,
 			TopLevelControl: opts.Dialect.TopLevelControl,
