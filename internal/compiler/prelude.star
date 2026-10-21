@@ -539,6 +539,56 @@ def _dict_popitem(self):
     k = self.keys()[0]
     return (k, self.pop(k))
 
+# ---- set methods ----
+
+def _set_union(self, *others):
+    s = set(self)
+    for o in others:
+        for x in o:
+            s.add(x)
+    return s
+
+def _set_update(self, *others):
+    for o in others:
+        for x in o:
+            self.add(x)
+    return None
+
+def _set_difference(self, other):
+    s = set(self)
+    for x in other:
+        s.discard(x)
+    return s
+
+def _set_intersection(self, other):
+    s = set()
+    for x in other:
+        if x in self:
+            s.add(x)
+    return s
+
+def _set_symmetric_difference(self, other):
+    s = set(self)
+    for x in other:
+        if x in s:
+            s.remove(x)
+        else:
+            s.add(x)
+    return s
+
+def _set_issubset(self, other):
+    seen = set()
+    for x in other:
+        if x in self:
+            seen.add(x)
+    return len(seen) == len(self)
+
+def _set_issuperset(self, other):
+    for x in other:
+        if x not in self:
+            return False
+    return True
+
 # ---- string formatting ----
 
 _DIGITS = "0123456789abcdef"

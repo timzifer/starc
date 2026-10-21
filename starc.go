@@ -43,6 +43,7 @@ type Dialect struct {
 	TopLevelControl bool // allow if/for/while at top level
 	GlobalReassign  bool // allow reassignment of top-level names
 	Recursion       bool // allow recursive function calls
+	Set             bool // provide the set type and the set builtin
 }
 
 // Options configures compilation. The zero value is a reactor module
@@ -187,6 +188,7 @@ func Compile(filename string, src []byte, opts *Options) ([]byte, error) {
 			TopLevelControl: opts.Dialect.TopLevelControl,
 			GlobalReassign:  opts.Dialect.GlobalReassign,
 			Recursion:       opts.Dialect.Recursion,
+			Set:             opts.Dialect.Set,
 		},
 	})
 	var el compiler.ErrorList

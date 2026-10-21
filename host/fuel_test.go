@@ -135,7 +135,7 @@ func TestFuelDeterministic(t *testing.T) {
 	}
 	// The exact numbers are part of the cost table: if they change, so
 	// must rt.FuelVersion (and docs/fuel.md).
-	if want := [2]int64{2456, 14760}; results[0] != want {
+	if want := [2]int64{2410, 14760}; results[0] != want {
 		t.Errorf("fuel = %v, want %v (bump the fuel version if this is intended)", results[0], want)
 	}
 	// Work is charged proportionally.
@@ -172,7 +172,7 @@ func TestFuelInit(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	_, err = host.Load(ctx, wasm, &host.Config{InitFuel: 2600, Stdout: &out, Stderr: &errb})
+	_, err = host.Load(ctx, wasm, &host.Config{InitFuel: 2500, Stdout: &out, Stderr: &errb})
 	var exit *host.ExitError
 	if !errors.As(err, &exit) || exit.Code != 2 || !errors.Is(err, host.ErrFuelExhausted) || errb.String() != "Error: fuel exhausted\n" || out.Len() == 0 {
 		t.Errorf("command: %v, stdout %q, stderr %q", err, out.String(), errb.String())

@@ -88,7 +88,7 @@ func (r *RT) PrimitiveMethods() []MethodSpec {
 			continue
 		}
 		rest := name[3:]
-		for prefix, tag := range map[string]int{"list.": TList, "dict.": TDict, "str.": TString} {
+		for prefix, tag := range map[string]int{"list.": TList, "dict.": TDict, "str.": TString, "set.": TSet} {
 			if len(rest) > len(prefix) && rest[:len(prefix)] == prefix {
 				ms = append(ms, MethodSpec{tag, rest[len(prefix):], rest})
 			}

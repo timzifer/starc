@@ -263,7 +263,7 @@ func (r *RT) registerColl() {
 		d := f.Param(0)
 		f.Add(
 			r.Call("check_mutable", get(d)),
-			If(ld(get(d), offDictIters), r.Fail("cannot modify dict during iteration")),
+			If(ld(get(d), offDictIters), r.Fail("cannot modify ", r.TypeName(get(d)), " during iteration")),
 		)
 	})
 	// dict_set(d, k, v)
@@ -425,7 +425,7 @@ func (r *RT) registerColl() {
 		t := f.Local(I32)
 		f.Add(
 			Set(t, tagOf(get(v))),
-			If(or(or(eq(get(t), c32(TString)), eq(get(t), c32(TTuple))), or(eq(get(t), c32(TList)), eq(get(t), c32(TDict)))),
+			If(or(or(or(eq(get(t), c32(TString)), eq(get(t), c32(TTuple))), or(eq(get(t), c32(TList)), eq(get(t), c32(TDict)))), eq(get(t), c32(TSet))),
 				Return(ld(get(v), 4))),
 			If(eq(get(t), c32(TRange)), Return(r.Call("range_len32", get(v)))),
 			r.Fail("len: value of type ", r.TypeName(get(v)), " has no len"),
@@ -442,7 +442,7 @@ func (r *RT) registerColl() {
 				Return(get(v)),
 			}),
 			If(or(eq(get(t), c32(TTuple)), eq(get(t), c32(TRange))), Return(get(v))),
-			If(eq(get(t), c32(TDict)), Seq{
+			If(or(eq(get(t), c32(TDict)), eq(get(t), c32(TSet))), Seq{
 				st(get(v), offDictIters, add(ld(get(v), offDictIters), c32(1))),
 				Return(r.Call("dict_view", get(v), c32(0))),
 			}),
@@ -453,7 +453,7 @@ func (r *RT) registerColl() {
 		v := f.Param(0)
 		f.Add(
 			If(isTag(get(v), TList), st(get(v), offListIters, sub(ld(get(v), offListIters), c32(1)))),
-			If(isTag(get(v), TDict), st(get(v), offDictIters, sub(ld(get(v), offDictIters), c32(1)))),
+			If(or(isTag(get(v), TDict), isTag(get(v), TSet)), st(get(v), offDictIters, sub(ld(get(v), offDictIters), c32(1)))),
 		)
 	})
 	r.define("seq_len", p1, r1, func(f *Func) {
@@ -626,7 +626,7 @@ func (r *RT) registerColl() {
 		v, a, b, s := f.Local(I64), f.Local(I64), f.Local(I64), f.Local(I64)
 		f.Add(
 			Set(t, tagOf(get(c))),
-			If(eq(get(t), c32(TDict)), Return(ne(r.Call("dict_get", get(c), get(x)), c32(0)))),
+			If(or(eq(get(t), c32(TDict)), eq(get(t), c32(TSet))), Return(ne(r.Call("dict_get", get(c), get(x)), c32(0)))),
 			If(or(eq(get(t), c32(TList)), eq(get(t), c32(TTuple))), Seq{
 				Set(n, ld(get(c), 4)),
 				Set(base, r.Call("seq_base", get(c))),

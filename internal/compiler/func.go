@@ -179,11 +179,25 @@ func (fc *fcomp) stmts(stmts []syntax.Stmt) []Expr { return fc.block(stmts, 0) }
 // block compiles a statement list. With fuel metering, the statements
 // and extra are charged together on entry.
 func (fc *fcomp) block(stmts []syntax.Stmt, extra int64) []Expr {
-	out := []Expr{fc.c.r.ChargeN(int64(len(stmts))*rt.FuelStatement + extra)}
+	n := int64(0)
+	for _, s := range stmts {
+		if !fc.dropped(s) {
+			n++
+		}
+	}
+	out := []Expr{fc.c.r.ChargeN(n*rt.FuelStatement + extra)}
 	for _, s := range stmts {
 		out = append(out, fc.stmt(s))
 	}
 	return out
+}
+
+// dropped reports whether s is a prelude definition that the program does
+// not use and that is therefore not compiled (nor charged, so that fuel
+// does not depend on the size of the prelude).
+func (fc *fcomp) dropped(s syntax.Stmt) bool {
+	d, ok := s.(*syntax.DefStmt)
+	return ok && fc.u.prelude && fc.c.reach != nil && !fc.c.reach.defs[d.Name.Name]
 }
 
 func (fc *fcomp) stmt(s syntax.Stmt) Expr {
@@ -270,7 +284,7 @@ func (fc *fcomp) stmt(s syntax.Stmt) Expr {
 		return fc.ret(fc.expr(s.Result))
 
 	case *syntax.DefStmt:
-		if fc.u.prelude && fc.c.reach != nil && !fc.c.reach.defs[s.Name.Name] {
+		if fc.dropped(s) {
 			return Nop()
 		}
 		return fc.assign(s.Name, fc.function(s.Function.(*resolve.Function), fc))

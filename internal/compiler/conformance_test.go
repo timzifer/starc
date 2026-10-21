@@ -43,7 +43,7 @@ func readChunks(t testing.TB, path string) []chunk {
 	return chunks
 }
 
-var testDialect = syntax.FileOptions{While: true, TopLevelControl: true, GlobalReassign: true}
+var testDialect = syntax.FileOptions{Set: true, While: true, TopLevelControl: true, GlobalReassign: true}
 
 // interpret runs src with the reference interpreter.
 func interpret(name, src string) (string, error) {

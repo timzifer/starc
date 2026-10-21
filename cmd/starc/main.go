@@ -126,6 +126,7 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 	fs.BoolVar(&o.dialect.TopLevelControl, "toplevel-control", false, "allow if/for/while at top level")
 	fs.BoolVar(&o.dialect.GlobalReassign, "global-reassign", false, "allow reassignment of top-level names")
 	fs.BoolVar(&o.dialect.Recursion, "recursion", false, "allow recursive functions")
+	fs.BoolVar(&o.dialect.Set, "set", false, "provide the set type")
 	fs.Usage = func() {
 		fmt.Fprint(stderr, usage)
 		fs.PrintDefaults()

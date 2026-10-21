@@ -129,7 +129,7 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 	}()
 
 	// Parse and resolve the prelude.
-	popts := &syntax.FileOptions{Set: false, While: true, TopLevelControl: true, GlobalReassign: true, Recursion: true}
+	popts := &syntax.FileOptions{Set: true, While: true, TopLevelControl: true, GlobalReassign: true, Recursion: true}
 	pfile, err := popts.Parse("<prelude>", preludeSrc, 0)
 	if err != nil {
 		return nil, fmt.Errorf("internal error: prelude: %w", err)
@@ -167,6 +167,9 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		}
 		if _, ok := c.host[name]; ok {
 			return true
+		}
+		if name == "set" && !opts.Dialect.Set {
+			return false
 		}
 		if strings.HasPrefix(name, "_") {
 			return false
@@ -217,7 +220,7 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		if !c.reach.defs[name] {
 			continue
 		}
-		for prefix, tag := range map[string]int{"_str_": rt.TString, "_list_": rt.TList, "_dict_": rt.TDict} {
+		for prefix, tag := range map[string]int{"_str_": rt.TString, "_list_": rt.TList, "_dict_": rt.TDict, "_set_": rt.TSet} {
 			if strings.HasPrefix(name, prefix) {
 				initBody = append(initBody, r.StoreMethod(tag, name[len(prefix):], GGet(c.prelude.byName[name])))
 			}
