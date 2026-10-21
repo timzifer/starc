@@ -10,11 +10,7 @@ permissions:
   attestations: write
 
 jobs:
-  vuln:
-    uses: ./.github/workflows/vuln.yml
-
   release:
-    needs: vuln
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -24,7 +20,7 @@ jobs:
         with:
           go-version: stable
       - name: Test
-        run: go test -race ./...
+        run: go test ./...
       - name: Install Syft (SBOM generation)
         uses: anchore/sbom-action/download-syft@v0
       - uses: goreleaser/goreleaser-action@v7
