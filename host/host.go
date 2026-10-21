@@ -63,6 +63,17 @@ type Meta struct {
 	NoWASI bool `json:"no_wasi,omitempty"`
 	// Fuel is the cost table of a module built with fuel metering.
 	Fuel *FuelTable `json:"fuel,omitempty"`
+	// Limits are the hard limits compiled into the module. They are zero
+	// for modules built before limits were recorded.
+	Limits Limits `json:"limits"`
+}
+
+// Limits are the hard limits of a module (see starc.Options).
+type Limits struct {
+	MemoryPages int `json:"memory_pages"`
+	CallDepth   int `json:"call_depth"`
+	InputBytes  int `json:"input_bytes,omitempty"`  // 0: no limit
+	ResultBytes int `json:"result_bytes,omitempty"` // 0: no limit
 }
 
 // FuelTable is the cost table of fuel metering (see docs/fuel.md).
@@ -92,9 +103,11 @@ type Error struct {
 
 func (e *Error) Error() string { return e.Msg }
 
-// Is reports whether target is ErrFuelExhausted and e has that cause.
+// Is reports whether target is the sentinel error of e's code, such as
+// ErrFuelExhausted for CodeFuel.
 func (e *Error) Is(target error) bool {
-	return target == ErrFuelExhausted && e.Code == CodeFuel
+	s, ok := codeErrors[e.Code]
+	return ok && target == s
 }
 
 // ErrorCode classifies a Starlark error (see starc_error_code).
@@ -104,18 +117,31 @@ type ErrorCode int
 const (
 	CodeStarlark ErrorCode = 1 // an ordinary Starlark error
 	CodeFuel     ErrorCode = 2 // the fuel budget was exhausted
+	CodeMemory   ErrorCode = 3 // the memory limit was reached
+	CodeDepth    ErrorCode = 4 // the call depth limit was exceeded
+	CodeSize     ErrorCode = 5 // arguments or result exceed their size limit
 )
 
-// ErrFuelExhausted matches (with errors.Is) the error of a call that
-// ran out of fuel.
-var ErrFuelExhausted = errors.New("fuel exhausted")
+// Sentinel errors that match (with errors.Is) an *Error with the
+// corresponding code.
+var (
+	ErrFuelExhausted = errors.New("fuel exhausted")
+	ErrOutOfMemory   = errors.New("out of memory")
+	ErrCallDepth     = errors.New("maximum call depth exceeded")
+	ErrTooLarge      = errors.New("value too large")
+)
+
+var codeErrors = map[ErrorCode]error{
+	CodeFuel: ErrFuelExhausted, CodeMemory: ErrOutOfMemory, CodeDepth: ErrCallDepth, CodeSize: ErrTooLarge,
+}
 
 // ExitError reports that a command module exited with a non-zero status.
 type ExitError struct {
 	Code uint32
 	// Err is the Starlark error that ended a starc command module: the
-	// exit status of such a module is the error code (1 for a Starlark
-	// error, 2 for exhausted fuel). Its message went to stderr.
+	// exit status of such a module is the error code (see ErrorCode). It
+	// is nil for status 1 (an ordinary error, whose message went to stderr)
+	// and for other modules.
 	Err *Error
 }
 
@@ -253,8 +279,8 @@ func Load(ctx context.Context, wasm []byte, cfg *Config) (*Module, error) {
 			_ = mod.Close(ctx)
 			if errors.As(err, &exit) {
 				e := &ExitError{Code: exit.ExitCode()}
-				if e.Code == uint32(CodeFuel) && meta.Fuel != nil {
-					e.Err = &Error{Msg: "fuel exhausted", Code: CodeFuel}
+				if s, ok := codeErrors[ErrorCode(e.Code)]; ok {
+					e.Err = &Error{Msg: s.Error(), Code: ErrorCode(e.Code)}
 				}
 				return fail(e)
 			}

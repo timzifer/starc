@@ -8,6 +8,16 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+* Hard limits: `Options.MaxMemoryPages` (`-max-pages`, default 65535)
+  is declared in the module and allocating beyond it fails with
+  `out of memory`. `Options.MaxCallDepth` (`-max-depth`, default 500)
+  limits calls and recursion into nested values (`repr`, `hash`,
+  freezing, encoding), so deep recursion fails the same way on every
+  engine instead of overflowing its stack. `MaxInputBytes` and
+  `MaxResultBytes` (`-max-input`, `-max-result`) limit the encoded
+  arguments and result of a call. The limits appear in `starc.meta`.
+* Error codes 3 (memory), 4 (call depth) and 5 (size), with
+  `host.ErrOutOfMemory`, `host.ErrCallDepth` and `host.ErrTooLarge`.
 * Fuel metering: `Options.Fuel` (`-fuel`) compiles a deterministic
   execution budget into the module. Statements, calls, loop iterations,
   runtime loops and memory traffic cost fuel per a versioned cost table
@@ -51,6 +61,11 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+* Encoding a value of 2 GiB or more for the host (such as a list that
+  repeats a large string) fails with an error instead of overflowing
+  the size computation.
+* Memory sizes no longer wrap at 4 GiB, because modules declare at most
+  65535 pages.
 * `host.Load` releases the compiled module once it is instantiated.
 * Repeating an empty string, list or tuple (`"" * 3`) no longer traps
   with an integer division by zero.

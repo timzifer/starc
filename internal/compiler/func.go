@@ -91,6 +91,7 @@ func (fc *fcomp) function(fn *resolve.Function, outer *fcomp) Expr {
 		c.specs = append(c.specs, spec)
 		f.Add(r.Call("enter", U32c(spec)))
 	}
+	f.Add(r.Enter())
 	slots := f.Local(I32)
 	f.Add(Set(slots, r.Call("bind", Get(f.Param(2)), Get(f.Param(0)), Get(f.Param(1)))))
 	for i, b := range fn.Locals {
@@ -168,7 +169,7 @@ func (fc *fcomp) ret(v Expr) Expr {
 	if fc.spec != 0 {
 		code = append(code, r.Leave(fc.spec))
 	}
-	return append(code, Return(Get(t)))
+	return append(code, r.LeaveCall(), Return(Get(t)))
 }
 
 // ---- statements ----

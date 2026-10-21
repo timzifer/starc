@@ -143,6 +143,12 @@ type Config struct {
 	NoWASI bool
 	// Fuel enables fuel metering (see fuel.go).
 	Fuel bool
+	// MaxCallDepth is the maximum depth of calls and of recursion into
+	// nested values (see limits.go).
+	MaxCallDepth int
+	// MaxInputBytes and MaxResultBytes limit the encoded arguments and
+	// result of an exported call; 0 means no limit.
+	MaxInputBytes, MaxResultBytes uint32
 }
 
 // RT is the runtime library for one module.
@@ -162,7 +168,8 @@ type RT struct {
 	HeapMax  *Global // high-water mark of the heap
 	CmpDepth *Global // nesting depth of the current comparison
 	Fuel     *Global // remaining fuel (i64), with Config.Fuel
-	ErrCode  *Global // code of the last error (ErrStarlark, ErrFuel)
+	ErrCode  *Global // code of the last error (ErrStarlark, ErrFuel, ...)
+	Depth    *Global // current call depth
 
 	None, False, True uint32
 
@@ -236,7 +243,11 @@ func New(m *Module, cfg Config) *RT {
 	}
 	r.hostRes = m.AddImport(&Import{Module: HostModule, Name: HostResult, Type: FuncType{Params: p1}})
 
+	if cfg.MaxCallDepth == 0 {
+		r.Cfg.MaxCallDepth = DefaultMaxCallDepth
+	}
 	r.initFuel()
+	r.initLimits()
 	r.registerCore()
 	r.registerNum()
 	r.registerStr()
@@ -532,7 +543,7 @@ func (r *RT) registerCore() {
 			r.chargeBytes(get(n)),
 			Set(p, GGet(r.Heap)),
 			Set(end, add(get(p), and(add(get(n), c32(7)), c32(-8)))),
-			If(I32LtU(get(end), get(p)), r.Fail("out of memory")),
+			If(I32LtU(get(end), get(p)), r.Call("out_of_memory")),
 			If(I32GtU(get(end), I32Shl(MemorySize(), c32(16))), Seq{
 				// Grow geometrically, by at least 4 MiB, to keep the number
 				// of (expensive) grow operations small.
@@ -542,7 +553,7 @@ func (r *RT) registerCore() {
 				If(I32GtU(get(pages), c32(4096)), Set(pages, c32(4096))),
 				If(I32LtU(get(pages), get(need)), Set(pages, get(need))),
 				If(eq(MemoryGrow(get(pages)), c32(-1)),
-					If(eq(MemoryGrow(get(need)), c32(-1)), r.Fail("out of memory"))),
+					If(eq(MemoryGrow(get(need)), c32(-1)), r.Call("out_of_memory"))),
 			}),
 			GSet(r.Heap, get(end)),
 			If(I32GtU(get(end), GGet(r.HeapMax)), GSet(r.HeapMax, get(end))),
@@ -565,6 +576,7 @@ func (r *RT) registerCore() {
 		f.Add(
 			GSet(r.ErrObj, get(msg)),
 			GSet(r.CmpDepth, c32(0)),
+			GSet(r.Depth, c32(0)),
 			If(eqz(GGet(r.ErrCode)), GSet(r.ErrCode, c32(ErrStarlark))),
 		)
 		if r.Cfg.Command {
@@ -650,7 +662,7 @@ func (r *RT) registerCore() {
 	})
 
 	// freeze(v): recursively marks v frozen.
-	r.define("freeze", p1, r0, func(f *Func) {
+	r.defineDeep("freeze", p1, r0, func(f *Func) {
 		v := f.Param(0)
 		t, i, n := f.Local(I32), f.Local(I32), f.Local(I32)
 		f.Add(

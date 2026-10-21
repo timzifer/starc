@@ -28,6 +28,8 @@ functions with closures.
 **Semantics:** values are frozen after module initialization; mutating a
 frozen value, or a list or dict while it is being iterated, is an error.
 Recursion is rejected at run time unless the `Recursion` option is set.
+Calls nest at most 500 deep by default (`MaxCallDepth`), and memory is
+limited to `MaxMemoryPages`; see [abi.md](abi.md#limits).
 
 **Dialect options** (`starc.Dialect` / CLI flags): `While` (`while`
 loops), `TopLevelControl` (`if`/`for`/`while` at top level),
@@ -89,4 +91,8 @@ and `dir`, and modules are unhashable. See
   `ctx.nope`, is a compile-time error rather than a run-time error.
 * There is no garbage collector: memory allocated during initialization
   or during one exported call is reclaimed only when the next call starts.
-  Very long-running calls can therefore use a lot of memory.
+  Very long-running calls can therefore use a lot of memory, up to the
+  memory limit.
+* Call depth is limited (500 by default), counting nested values that
+  are printed, hashed or passed to the host as well; go.starlark.net
+  limits only the Go stack.

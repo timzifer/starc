@@ -131,6 +131,8 @@ type Module struct {
 	ExportMemory string
 	// MinPages is the minimum memory size; it is raised to fit static data.
 	MinPages uint32
+	// MaxPages, if non-zero, is the maximum memory size in pages.
+	MaxPages uint32
 	// Customs are custom sections appended after all other sections.
 	Customs []Custom
 	// Names controls emission of the "name" custom section.

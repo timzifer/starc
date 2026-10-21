@@ -248,9 +248,18 @@ func (m *Module) Encode() (out []byte, err error) {
 	if pages < need+1 {
 		pages = need + 1
 	}
+	if m.MaxPages != 0 && pages > m.MaxPages {
+		return nil, fmt.Errorf("wasm: static data needs %d memory pages, more than the maximum of %d", pages, m.MaxPages)
+	}
 	p = appendULEB(nil, 1)
-	p = append(p, 0x00)
-	p = appendULEB(p, uint64(pages))
+	if m.MaxPages != 0 {
+		p = append(p, 0x01)
+		p = appendULEB(p, uint64(pages))
+		p = appendULEB(p, uint64(m.MaxPages))
+	} else {
+		p = append(p, 0x00)
+		p = appendULEB(p, uint64(pages))
+	}
 	section(5, p)
 
 	// Global section.

@@ -79,7 +79,7 @@ func (r *RT) registerHost() {
 		f.Add(
 			If(and(ne(get(kw), c32(0)), eqz(ld(get(kw), offDictLen))), Set(kw, c32(0))),
 			Set(n, r.Call("enc_size", get(args))),
-			If(get(kw), Set(n, add(get(n), r.Call("enc_size", get(kw))))),
+			If(get(kw), Set(n, r.Call("size_add", get(n), r.Call("enc_size", get(kw))))),
 			Set(p, r.Call("alloc", get(n))),
 			GSet(r.Cursor, get(p)),
 			r.Call("encode", get(args)),
