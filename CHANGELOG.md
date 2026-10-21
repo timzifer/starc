@@ -36,6 +36,11 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+* A command module that fails exits with its error code as status: 1
+  for a Starlark error as before, 2 for exhausted fuel.
+  `host.ExitError.Err` carries the cause.
+* `host.Load` runs the start function of a command module itself, after
+  setting the fuel budget.
 * Modules check the bounds of encoded call arguments: truncated values,
   invalid tags and trailing bytes are Starlark errors instead of reads
   beyond the buffer.
