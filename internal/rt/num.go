@@ -427,7 +427,7 @@ func (r *RT) registerNum() {
 	})
 
 	// hash(v) -> i32
-	r.define("hash", p1, r1, func(f *Func) {
+	r.defineDeep("hash", p1, r1, func(f *Func) {
 		v := f.Param(0)
 		t, h, i := f.Local(I32), f.Local(I32), f.Local(I32)
 		x := f.Local(I64)

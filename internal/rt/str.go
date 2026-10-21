@@ -236,7 +236,7 @@ func (r *RT) registerStr() {
 	})
 
 	// repr(v) -> string
-	r.define("repr", p1, r1, func(f *Func) {
+	r.defineDeep("repr", p1, r1, func(f *Func) {
 		v := f.Param(0)
 		t, parts, i, n, base, ent := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
 		push := func(x Expr) Expr { return r.Call("list_append_raw", get(parts), x) }

@@ -71,7 +71,25 @@ type Options struct {
 	// sets the budget with starc_fuel_set; when it is exhausted, the
 	// program fails with "fuel exhausted" (starc_error_code 2).
 	Fuel bool
+	// MaxMemoryPages is the maximum size of linear memory in 64 KiB pages,
+	// at most 65535. 0 means 65535 (one page short of 4 GiB). Allocating
+	// beyond it fails with "out of memory" (starc_error_code 3).
+	MaxMemoryPages uint32
+	// MaxCallDepth is the maximum depth of calls of Starlark functions,
+	// together with recursion into nested values (repr, hash, encoding, …).
+	// 0 means 500, which every common engine supports; the maximum is 2^20.
+	// Exceeding it fails with "maximum call depth exceeded" (code 4). Much
+	// larger values can overflow the stack of some engines, such as
+	// wazero's interpreter.
+	MaxCallDepth int
+	// MaxInputBytes and MaxResultBytes limit the encoded arguments and the
+	// encoded result of an exported call (code 5); 0 means no limit.
+	MaxInputBytes, MaxResultBytes uint32
 }
+
+// maxCallDepth bounds Options.MaxCallDepth; no engine supports deeper
+// call stacks anyway.
+const maxCallDepth = 1 << 20
 
 // HostFunc declares a function provided by the host.
 type HostFunc struct {
@@ -126,6 +144,12 @@ func Compile(filename string, src []byte, opts *Options) ([]byte, error) {
 	if opts == nil {
 		opts = &Options{}
 	}
+	if opts.MaxMemoryPages > 65535 {
+		return nil, fmt.Errorf("MaxMemoryPages %d exceeds 65535", opts.MaxMemoryPages)
+	}
+	if opts.MaxCallDepth < 0 || opts.MaxCallDepth > maxCallDepth {
+		return nil, fmt.Errorf("MaxCallDepth %d out of range [0, %d]", opts.MaxCallDepth, maxCallDepth)
+	}
 	var host []string
 	costs := map[string]int64{}
 	for _, h := range opts.Host {
@@ -146,6 +170,11 @@ func Compile(filename string, src []byte, opts *Options) ([]byte, error) {
 		HostCost: costs,
 		NoWASI:   opts.NoWASI,
 		Fuel:     opts.Fuel,
+
+		MaxMemoryPages: opts.MaxMemoryPages,
+		MaxCallDepth:   opts.MaxCallDepth,
+		MaxInputBytes:  opts.MaxInputBytes,
+		MaxResultBytes: opts.MaxResultBytes,
 		Dialect: syntax.FileOptions{
 			While:           opts.Dialect.While,
 			TopLevelControl: opts.Dialect.TopLevelControl,

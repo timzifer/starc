@@ -51,9 +51,10 @@ starc run examples/wordcount.star count_words "a b a" 1
 ```
 
 Flags: `-o`, `-command`, `-export a,b`, `-no-names`, `-host ctx.entity,now`,
-`-no-wasi`, `-fuel`, `-budget N` (run), and the dialect flags `-while`,
-`-toplevel-control`, `-global-reassign`, `-recursion`. Run `starc help`
-for details.
+`-no-wasi`, `-fuel`, `-budget N` (run), the limits `-max-pages`,
+`-max-depth`, `-max-input`, `-max-result`, and the dialect flags
+`-while`, `-toplevel-control`, `-global-reassign`, `-recursion`. Run
+`starc help` for details.
 
 ## Go package
 
@@ -124,6 +125,12 @@ left, _ := m.Fuel(ctx)
 ```
 
 See [docs/fuel.md](docs/fuel.md) for the cost table.
+
+Hard limits complete the sandbox: memory (`MaxMemoryPages`), call depth
+(`MaxCallDepth`, 500 by default) and the size of arguments and results
+(`MaxInputBytes`, `MaxResultBytes`). Exceeding one is a defined error
+(`host.ErrOutOfMemory`, `host.ErrCallDepth`, `host.ErrTooLarge`) on
+every platform; see [docs/abi.md](docs/abi.md#limits).
 
 ## Module interface
 

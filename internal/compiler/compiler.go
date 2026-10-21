@@ -43,6 +43,14 @@ type Options struct {
 	HostCost map[string]int64
 	// Fuel enables fuel metering.
 	Fuel bool
+	// MaxMemoryPages is the maximum memory size in 64 KiB pages; 0 means
+	// rt.MaxMemoryPages.
+	MaxMemoryPages uint32
+	// MaxCallDepth limits the depth of calls; 0 means rt.DefaultMaxCallDepth.
+	MaxCallDepth int
+	// MaxInputBytes and MaxResultBytes limit the encoded arguments and
+	// result of an exported call; 0 means no limit.
+	MaxInputBytes, MaxResultBytes uint32
 }
 
 // Error is a compilation error at a source position.
@@ -125,7 +133,12 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		return nil, fmt.Errorf("internal error: prelude: %w", err)
 	}
 	m := &Module{ExportMemory: "memory", Names: opts.Names}
-	r := rt.New(m, rt.Config{Command: opts.Command, NoWASI: opts.NoWASI, Fuel: opts.Fuel})
+	m.MaxPages = opts.MaxMemoryPages
+	if m.MaxPages == 0 {
+		m.MaxPages = rt.MaxMemoryPages
+	}
+	r := rt.New(m, rt.Config{Command: opts.Command, NoWASI: opts.NoWASI, Fuel: opts.Fuel,
+		MaxCallDepth: opts.MaxCallDepth, MaxInputBytes: opts.MaxInputBytes, MaxResultBytes: opts.MaxResultBytes})
 	c.m, c.r = m, r
 
 	preludeUniverse := func(name string) bool {
@@ -269,7 +282,10 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		Host    []string      `json:"host,omitempty"`
 		NoWASI  bool          `json:"no_wasi,omitempty"`
 		Fuel    *rt.FuelTable `json:"fuel,omitempty"`
-	}{1, map[bool]string{true: "command", false: "reactor"}[opts.Command], meta, hostFuncs, opts.NoWASI, c.fuelTable()})
+		Limits  rt.Limits     `json:"limits"`
+	}{1, map[bool]string{true: "command", false: "reactor"}[opts.Command], meta, hostFuncs, opts.NoWASI, c.fuelTable(),
+		rt.Limits{MemoryPages: int(m.MaxPages), CallDepth: r.Cfg.MaxCallDepth,
+			InputBytes: int(opts.MaxInputBytes), ResultBytes: int(opts.MaxResultBytes)}})
 	m.Customs = append(m.Customs, Custom{Name: MetaSection, Payload: payload})
 
 	return m.Encode()
@@ -431,6 +447,7 @@ func (c *compiler) exportWrapper(name string) *Func {
 	f.Add(
 		GSet(r.ErrObj, I32c(0)),
 		GSet(r.ErrCode, I32c(0)),
+		GSet(r.Depth, I32c(0)),
 		Set(fn, GGet(c.user.byName[name])),
 		Set(kw, r.Call("alloc", I32c(4))),
 		Set(args, r.Call("abi_args", Get(ptr), Get(n), Get(kw))),

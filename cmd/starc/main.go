@@ -97,6 +97,10 @@ type buildOpts struct {
 	noWASI  bool
 	fuel    bool
 	budget  int64
+	limits  struct {
+		pages, input, result uint
+		depth                int
+	}
 	dialect starc.Dialect
 }
 
@@ -112,6 +116,10 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 	fs.BoolVar(&o.noWASI, "no-wasi", false, "import nothing but host functions (print goes to the host)")
 	fs.BoolVar(&o.fuel, "fuel", false, "compile deterministic fuel metering into the module (run: report the fuel used)")
 	fs.Int64Var(&o.budget, "budget", 0, "run: fuel budget for the top-level code and for the call (implies -fuel; 0 = unlimited)")
+	fs.UintVar(&o.limits.pages, "max-pages", 0, "maximum memory size in 64 KiB pages (default 65535)")
+	fs.IntVar(&o.limits.depth, "max-depth", 0, "maximum call depth (default 500)")
+	fs.UintVar(&o.limits.input, "max-input", 0, "maximum size of the encoded arguments of a call in bytes (default unlimited)")
+	fs.UintVar(&o.limits.result, "max-result", 0, "maximum size of the encoded result of a call in bytes (default unlimited)")
 	fs.BoolVar(&o.dialect.While, "while", false, "allow while loops")
 	fs.BoolVar(&o.dialect.TopLevelControl, "toplevel-control", false, "allow if/for/while at top level")
 	fs.BoolVar(&o.dialect.GlobalReassign, "global-reassign", false, "allow reassignment of top-level names")
@@ -124,7 +132,9 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 }
 
 func (o *buildOpts) options() *starc.Options {
-	opts := &starc.Options{NoNames: o.noNames, NoWASI: o.noWASI, Fuel: o.fuel || o.budget > 0, Dialect: o.dialect}
+	opts := &starc.Options{NoNames: o.noNames, NoWASI: o.noWASI, Fuel: o.fuel || o.budget > 0, Dialect: o.dialect,
+		MaxMemoryPages: uint32(min(o.limits.pages, 1<<32-1)), MaxCallDepth: o.limits.depth,
+		MaxInputBytes: uint32(min(o.limits.input, 1<<32-1)), MaxResultBytes: uint32(min(o.limits.result, 1<<32-1))}
 	if o.command {
 		opts.ExecModel = starc.Command
 	}

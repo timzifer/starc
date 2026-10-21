@@ -70,7 +70,7 @@ func TestFuelExhausted(t *testing.T) {
 		name string
 		args []any
 	}{
-		{"spin", nil}, {"nested", nil}, {"sorts", []any{xs}}, {"rec", []any{0}}, {"builds", nil},
+		{"spin", nil}, {"nested", nil}, {"sorts", []any{xs}}, {"builds", nil},
 	} {
 		const budget = 200000
 		if err := m.SetFuel(ctx, budget); err != nil {

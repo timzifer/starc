@@ -25,7 +25,9 @@ func (r *RT) registerABI() {
 			// A new call begins: forget the error of the last one.
 			GSet(r.ErrObj, c32(0)),
 			GSet(r.ErrCode, c32(0)),
+			GSet(r.Depth, c32(0)),
 			r.Call("arena_reset"),
+			r.checkSize(get(f.Param(0)), r.Cfg.MaxInputBytes, "arguments too large"),
 			r.Call("alloc", get(f.Param(0))),
 		)
 	})
@@ -41,7 +43,7 @@ func (r *RT) registerABI() {
 	// decode() -> value read at the cursor. The bytes up to CurEnd are
 	// untrusted: a value that does not fit is an error, never a read
 	// beyond the buffer.
-	r.define("decode", p0, r1, func(f *Func) {
+	r.defineDeep("decode", p0, r1, func(f *Func) {
 		t, n, i, o, k := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
 		cur := func() Expr { return GGet(r.Cursor) }
 		adv := func(n Expr) Expr { return GSet(r.Cursor, add(cur(), n)) }
@@ -106,33 +108,44 @@ func (r *RT) registerABI() {
 		f.Add(If(ne(GGet(r.Cursor), GGet(r.CurEnd)), r.Fail("abi: trailing bytes after value")))
 	})
 	// enc_size(v) -> encoded size in bytes
-	r.define("enc_size", p1, r1, func(f *Func) {
+	r.defineDeep("enc_size", p1, r1, func(f *Func) {
 		v := f.Param(0)
 		t, n, i, s, e := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
 		f.Add(
 			Set(t, tagOf(get(v))),
 			If(or(eq(get(t), c32(TNone)), eq(get(t), c32(TBool))), Return(c32(1))),
 			If(or(eq(get(t), c32(TInt)), eq(get(t), c32(TFloat))), Return(c32(9))),
-			If(eq(get(t), c32(TString)), Return(add(c32(5), slen(get(v))))),
+			If(eq(get(t), c32(TString)), Return(r.Call("size_add", c32(5), slen(get(v))))),
 			If(or(eq(get(t), c32(TList)), eq(get(t), c32(TTuple))), Seq{
 				Set(s, c32(5)),
 				Set(n, ld(get(v), 4)),
 				r.forRange(i, c32(0), get(n),
-					Set(s, add(get(s), r.Call("enc_size", ld(elem(r.Call("seq_base", get(v)), 0, get(i)), 0))))),
+					Set(s, r.Call("size_add", get(s), r.Call("enc_size", ld(elem(r.Call("seq_base", get(v)), 0, get(i)), 0))))),
 				Return(get(s)),
 			}),
 			If(eq(get(t), c32(TDict)), Seq{
 				Set(s, c32(5)),
 				r.forRange(i, c32(0), ld(get(v), offDictUsed),
 					Set(e, add(ld(get(v), offDictEntries), mul(get(i), c32(12)))),
-					If(ld(get(e), 4), Set(s, add(get(s), add(r.Call("enc_size", ld(get(e), 4)), r.Call("enc_size", ld(get(e), 8))))))),
+					If(ld(get(e), 4), Set(s, r.Call("size_add", get(s),
+						r.Call("size_add", r.Call("enc_size", ld(get(e), 4)), r.Call("enc_size", ld(get(e), 8))))))),
 				Return(get(s)),
 			}),
 			r.Fail("cannot pass value of type ", r.TypeName(get(v)), " to the host"),
 		)
 	})
+	// size_add(a, b) -> a + b for encoded sizes, which must stay below
+	// 2^31 (a and b are below 2^31, so the unsigned sum cannot wrap).
+	r.define("size_add", p2, r1, func(f *Func) {
+		s := f.Local(I32)
+		f.Add(
+			Set(s, add(get(f.Param(0)), get(f.Param(1)))),
+			If(I32GtU(get(s), c32(0x7fffffff)), r.Call("fail_code", r.S("value too large to pass to the host"), c32(ErrSize))),
+			get(s),
+		)
+	})
 	// encode(v): writes v at the cursor
-	r.define("encode", p1, r0, func(f *Func) {
+	r.defineDeep("encode", p1, r0, func(f *Func) {
 		v := f.Param(0)
 		t, n, i, e := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
 		cur := func() Expr { return GGet(r.Cursor) }
@@ -168,6 +181,7 @@ func (r *RT) registerABI() {
 		n, p := f.Local(I32), f.Local(I32)
 		f.Add(
 			Set(n, r.Call("enc_size", get(f.Param(0)))),
+			r.checkSize(get(n), r.Cfg.MaxResultBytes, "result too large"),
 			Set(p, r.Call("alloc", get(n))),
 			GSet(r.Cursor, get(p)),
 			r.Call("encode", get(f.Param(0))),

@@ -48,7 +48,7 @@ rejects such a module if it imports anything from WASI.
 | `_initialize` | `() -> ()` | runs the top-level statements, then freezes all global values; call exactly once |
 | `starc_alloc` | `(n: i32) -> i32` | resets the per-call arena and returns a pointer to `n` bytes for call arguments |
 | `starc_error` | `() -> i64` | location of the last error message (see below), or 0 |
-| `starc_error_code` | `() -> i32` | cause of the last error: 1 Starlark error, 2 fuel exhausted, 0 none |
+| `starc_error_code` | `() -> i32` | cause of the last error (see [Errors](#errors)), or 0 |
 | `starc_fuel_set` | `(n: i64) -> ()` | sets the remaining fuel budget (only with fuel metering, see [fuel.md](fuel.md)) |
 | `starc_fuel` | `() -> i64` | returns the remaining fuel budget (only with fuel metering) |
 | *function* | `(ptr: i32, len: i32) -> i64` | one export per exported top-level `def` |
@@ -64,8 +64,9 @@ are reserved.
 With `ExecModel: Command` (`-command`) the module exports `memory` and
 `_start`, plus the two fuel functions with fuel metering. `_start` runs
 the program. On error, `Error: <message>` is written to stderr and the
-module calls `proc_exit` with the error code as status: 1 for a Starlark
-error, 2 for exhausted fuel.
+module calls `proc_exit` with the error code as status (see
+[Errors](#errors)): 1 for a Starlark error, 2 for exhausted fuel, 3–5 for
+the other limits.
 
 ## Calling a function
 
@@ -95,6 +96,45 @@ remains usable for further calls.
 The module decodes the argument buffer defensively: a value that does
 not fit into `len` bytes, an invalid tag or trailing bytes are Starlark
 errors (`abi: truncated value`, …), never reads beyond the buffer.
+
+`starc_error_code()` tells the causes apart:
+
+| Code | Cause | Message |
+|---|---|---|
+| 0 | no error | |
+| 1 | an ordinary Starlark error | as raised |
+| 2 | fuel exhausted ([fuel.md](fuel.md)) | `fuel exhausted` |
+| 3 | memory limit reached | `out of memory` |
+| 4 | call depth limit exceeded | `maximum call depth exceeded` |
+| 5 | arguments or result too large | `arguments too large: …`, `result too large: …`, `value too large to pass to the host` |
+
+## Limits
+
+Every module has hard limits, so that a call fails with a defined
+error (and code) on every platform instead of running into the limits of
+the WebAssembly engine. A failed call returns no partial result, and the
+instance remains usable.
+
+* **Memory:** the module declares a maximum memory size,
+  `Options.MaxMemoryPages` (`-max-pages`), by default 65535 pages (one
+  page short of 4 GiB). An allocation beyond it fails with `out of
+  memory`. Memory use is deterministic, so the failure point is the same
+  everywhere.
+* **Call depth:** every call of a Starlark function counts toward a
+  depth limit, `Options.MaxCallDepth` (`-max-depth`), by default 500. So
+  does every level of recursion into nested values (`repr`/`str`,
+  `hash`, freezing, encoding and decoding values that cross the host
+  boundary). The default fits into the call stack of all common engines,
+  including wazero's interpreter (2000 frames). Much larger limits can
+  exhaust the stack of some engines before the limit is reached, which
+  traps without a defined error.
+* **Sizes:** `Options.MaxInputBytes` (`-max-input`) limits the encoded
+  arguments of an exported call (checked by `starc_alloc`), and
+  `Options.MaxResultBytes` (`-max-result`) the encoded result. Both are
+  unlimited by default. An encoding that would reach 2 GiB always fails.
+
+A command module that fails exits with the error code as its status.
+The limits appear in `starc.meta`.
 
 ## Host functions
 
@@ -164,7 +204,8 @@ The custom section `starc.meta` contains UTF-8 JSON:
   "host": ["ctx.entity", "ctx.now"],
   "no_wasi": true,
   "fuel": {"version": 1, "statement": 1, "call": 1, "iteration": 1,
-           "runtime_iteration": 1, "bytes_per_unit": 16}
+           "runtime_iteration": 1, "bytes_per_unit": 16},
+  "limits": {"memory_pages": 65535, "call_depth": 500, "result_bytes": 65536}
 }
 ```
 
@@ -172,7 +213,8 @@ Parameter names of `*args` and `**kwargs` parameters are prefixed with
 `*` and `**`. `host` lists the imported host functions and is omitted if
 there are none; `no_wasi` is omitted for modules that may import WASI.
 `fuel` is the cost table of a module built with fuel metering
-([fuel.md](fuel.md)) and is omitted otherwise.
+([fuel.md](fuel.md)) and is omitted otherwise. `limits` lists the
+[limits](#limits); the size limits are omitted when unlimited.
 
 ## Example: JavaScript host
 
