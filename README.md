@@ -1,5 +1,9 @@
 # starc
 
+<p align="center">
+  <img src="docs/images/gopher.png" alt="starc gopher" width="200">
+</p>
+
 [![CI](https://github.com/timzifer/starc/actions/workflows/ci.yml/badge.svg)](https://github.com/timzifer/starc/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/timzifer/starc.svg)](https://pkg.go.dev/github.com/timzifer/starc)
 [![Release](https://img.shields.io/github/v/release/timzifer/starc?sort=semver)](https://github.com/timzifer/starc/releases)
