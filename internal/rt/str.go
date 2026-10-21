@@ -276,6 +276,8 @@ func (r *RT) registerStr() {
 				Return(r.Msg("<function ", ld(ld(get(v), offFnSpec), offSpecName), ">"))),
 			If(eq(get(t), c32(TBuiltin)),
 				Return(r.Msg("<built-in function ", ld(get(v), offBiName), ">"))),
+			If(eq(get(t), c32(TModule)),
+				Return(r.Msg("<module ", r.Call("quote", ld(get(v), offModName)), ">"))),
 			If(eq(get(t), c32(TBound)),
 				Return(r.Msg("<built-in method ", r.Call("callable_name", ld(get(v), offBoundFn)), " of ",
 					r.TypeName(ld(get(v), offBoundRecv)), " value>"))),

@@ -455,7 +455,7 @@ func (r *RT) registerNum() {
 					Set(h, add(mul(I32Xor(get(h), r.Call("hash", ld(elem(get(v), offTupElems, get(i)), 0))), c32(1000003)), get(i)))),
 				Return(get(h)),
 			}),
-			If(or(or(eq(get(t), c32(TList)), eq(get(t), c32(TDict))), eq(get(t), c32(TRange))),
+			If(or(or(eq(get(t), c32(TList)), eq(get(t), c32(TDict))), or(eq(get(t), c32(TRange)), eq(get(t), c32(TModule)))),
 				r.Fail("unhashable type: ", r.TypeName(get(v)))),
 			mul(get(v), c32(-1640531535)),
 		)

@@ -64,6 +64,25 @@ func TestErrors(t *testing.T) {
 	}
 }
 
+func TestHostFlags(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "h.wasm")
+	src := "print(ctx.now())\n"
+	if code, _, stderr := cli(t, src, "-o", out, "-host", "ctx.now, ctx.self", "-no-wasi", "-"); code != 0 {
+		t.Fatalf("build: %s", stderr)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil || bytes.Contains(data, []byte("wasi_snapshot_preview1")) || !bytes.Contains(data, []byte("ctx.now")) {
+		t.Fatalf("bad module: %v", err)
+	}
+	// The CLI provides no host functions.
+	if code, _, stderr := cli(t, "", "run", out); code != 1 || !strings.Contains(stderr, `"ctx.now"`) {
+		t.Errorf("run: code %d stderr %q", code, stderr)
+	}
+	if code, _, stderr := cli(t, "print(1)", "-host", "a..b", "-o", out, "-"); code != 1 || !strings.Contains(stderr, "invalid host function name") {
+		t.Errorf("bad name: code %d stderr %q", code, stderr)
+	}
+}
+
 func TestModuleVersion(t *testing.T) {
 	for in, want := range map[string]string{
 		"":        "",

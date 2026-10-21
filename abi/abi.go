@@ -217,6 +217,37 @@ func appendDict(b []byte, d *Dict) ([]byte, error) {
 	return b, nil
 }
 
+// DecodeCall decodes call arguments encoded by [EncodeCall]: a tuple of
+// positional arguments, optionally followed by a dict of keyword
+// arguments with string keys. kwargs is nil if there are none.
+func DecodeCall(b []byte) (args []any, kwargs *Dict, err error) {
+	v, rest, err := DecodePrefix(b)
+	if err != nil {
+		return nil, nil, err
+	}
+	t, ok := v.(Tuple)
+	if !ok {
+		return nil, nil, fmt.Errorf("abi: arguments are a %T, want a tuple", v)
+	}
+	if len(rest) > 0 {
+		if v, rest, err = DecodePrefix(rest); err != nil {
+			return nil, nil, err
+		}
+		if kwargs, ok = v.(*Dict); !ok {
+			return nil, nil, fmt.Errorf("abi: keyword arguments are a %T, want a dict", v)
+		}
+		for _, e := range kwargs.Entries {
+			if _, ok := e.Key.(string); !ok {
+				return nil, nil, fmt.Errorf("abi: keyword argument name %v is not a string", e.Key)
+			}
+		}
+		if len(rest) != 0 {
+			return nil, nil, fmt.Errorf("abi: %d trailing bytes", len(rest))
+		}
+	}
+	return []any(t), kwargs, nil
+}
+
 // ErrTruncated reports an incomplete encoding.
 var ErrTruncated = errors.New("abi: truncated value")
 
@@ -232,9 +263,15 @@ func Decode(b []byte) (any, error) {
 	return v, nil
 }
 
+// MaxDepth is the maximum nesting depth of lists, tuples and dicts that
+// the decoder accepts, so that untrusted input cannot exhaust the stack.
+const MaxDepth = 10000
+
 // DecodePrefix decodes one value from the start of b and returns the
 // remaining bytes.
-func DecodePrefix(b []byte) (any, []byte, error) {
+func DecodePrefix(b []byte) (any, []byte, error) { return decodePrefix(b, 0) }
+
+func decodePrefix(b []byte, depth int) (any, []byte, error) {
 	if len(b) == 0 {
 		return nil, nil, ErrTruncated
 	}
@@ -261,6 +298,9 @@ func DecodePrefix(b []byte) (any, []byte, error) {
 	}
 	n := binary.LittleEndian.Uint32(b)
 	b = b[4:]
+	if tag != TagStr && depth >= MaxDepth {
+		return nil, nil, fmt.Errorf("abi: values nested more than %d deep", MaxDepth)
+	}
 	switch tag {
 	case TagStr:
 		if uint64(len(b)) < uint64(n) {
@@ -274,7 +314,7 @@ func DecodePrefix(b []byte) (any, []byte, error) {
 		xs := make([]any, n)
 		for i := range xs {
 			var err error
-			if xs[i], b, err = DecodePrefix(b); err != nil {
+			if xs[i], b, err = decodePrefix(b, depth+1); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -292,10 +332,10 @@ func DecodePrefix(b []byte) (any, []byte, error) {
 		}
 		for i := range d.Entries {
 			var err error
-			if d.Entries[i].Key, b, err = DecodePrefix(b); err != nil {
+			if d.Entries[i].Key, b, err = decodePrefix(b, depth+1); err != nil {
 				return nil, nil, err
 			}
-			if d.Entries[i].Value, b, err = DecodePrefix(b); err != nil {
+			if d.Entries[i].Value, b, err = decodePrefix(b, depth+1); err != nil {
 				return nil, nil, err
 			}
 		}

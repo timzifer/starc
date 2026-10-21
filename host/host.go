@@ -16,6 +16,7 @@ import (
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/experimental"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/sys"
 
@@ -27,9 +28,20 @@ type Config struct {
 	// Stdout and Stderr receive the module's output (print). Nil discards it.
 	Stdout, Stderr io.Writer
 	// Runtime, if set, is used instead of a private wazero runtime. It
-	// must already have WASI instantiated.
+	// must already have WASI instantiated, unless the module was built
+	// without WASI.
 	Runtime wazero.Runtime
+	// Funcs implements the host functions that the module imports (see
+	// starc.Options.Host), keyed by their dotted names. Load fails if the
+	// module imports a function that is missing here.
+	Funcs map[string]Func
 }
+
+// Func implements a host function. It receives the positional and
+// keyword arguments of the call (kwargs is nil if there are none) and
+// returns a value that package abi can encode. A non-nil error becomes a
+// Starlark error in the calling program, with the error text as message.
+type Func func(ctx context.Context, args []any, kwargs *abi.Dict) (any, error)
 
 // Export describes an exported Starlark function.
 type Export struct {
@@ -42,7 +54,19 @@ type Meta struct {
 	Version int      `json:"version"`
 	Model   string   `json:"model"` // "reactor" or "command"
 	Exports []Export `json:"exports"`
+	// Host lists the host functions that the module imports.
+	Host []string `json:"host,omitempty"`
+	// NoWASI reports a module built without WASI imports.
+	NoWASI bool `json:"no_wasi,omitempty"`
 }
+
+// Names of the host import module and of its protocol functions.
+const (
+	hostModule = "starc_host"
+	hostResult = "starc_result"
+	hostPrint  = "starc_print"
+	wasiModule = "wasi_snapshot_preview1"
+)
 
 // Error is a Starlark runtime error reported by the module.
 type Error struct {
@@ -63,10 +87,12 @@ type Module struct {
 	rt      wazero.Runtime
 	ownRT   bool
 	mod     api.Module
+	hostMod api.Module
 	meta    Meta
 	alloc   api.Function
 	errFn   api.Function
 	exports map[string]api.Function
+	busy    bool // a call is in progress
 }
 
 // ReadMeta extracts the starc.meta custom section from a module binary.
@@ -115,6 +141,8 @@ func Load(ctx context.Context, wasm []byte, cfg *Config) (*Module, error) {
 	if err != nil {
 		return fail(err)
 	}
+	// The instance outlives the compiled module.
+	defer cm.Close(ctx)
 	meta, err := metaOf(cm)
 	if err != nil {
 		return fail(err)
@@ -122,7 +150,27 @@ func Load(ctx context.Context, wasm []byte, cfg *Config) (*Module, error) {
 	if err := checkExports(cm, meta); err != nil {
 		return fail(err)
 	}
+	if err := checkImports(cm, meta, cfg.Funcs); err != nil {
+		return fail(err)
+	}
 	m.meta = *meta
+	if m.hostMod, err = instantiateHost(ctx, m.rt, cm, cfg); err != nil {
+		return fail(err)
+	}
+	if m.hostMod != nil {
+		hostMod := m.hostMod
+		ctx = experimental.WithImportResolver(ctx, func(name string) api.Module {
+			if name == hostModule {
+				return hostMod
+			}
+			return nil
+		})
+		fail0 := fail
+		fail = func(err error) (*Module, error) {
+			_ = hostMod.Close(ctx)
+			return fail0(err)
+		}
+	}
 	mc := wazero.NewModuleConfig().WithName("")
 	if cfg.Stdout != nil {
 		mc = mc.WithStdout(cfg.Stdout)
@@ -229,11 +277,18 @@ func (m *Module) Call(ctx context.Context, name string, args ...any) (any, error
 }
 
 // CallKw calls an exported function with positional and keyword arguments.
+// A host function must not call back into the module that called it:
+// the call would reset the arena that the suspended call still uses.
 func (m *Module) CallKw(ctx context.Context, name string, args []any, kwargs *abi.Dict) (any, error) {
 	fn, ok := m.exports[name]
 	if !ok || fn == nil {
 		return nil, fmt.Errorf("host: module exports no function %q", name)
 	}
+	if m.busy {
+		return nil, errors.New("host: module called from one of its own host functions")
+	}
+	m.busy = true
+	defer func() { m.busy = false }()
 	payload, err := abi.EncodeCall(args, kwargs)
 	if err != nil {
 		return nil, err
@@ -288,6 +343,11 @@ func (m *Module) Close(ctx context.Context) error {
 	var err error
 	if m.mod != nil {
 		err = m.mod.Close(ctx)
+	}
+	if m.hostMod != nil {
+		if e := m.hostMod.Close(ctx); err == nil {
+			err = e
+		}
 	}
 	if m.ownRT {
 		if e := m.rt.Close(ctx); err == nil {

@@ -32,6 +32,12 @@ type Options struct {
 	Names bool
 	// Dialect selects optional language features.
 	Dialect syntax.FileOptions
+	// Host lists host functions by dotted name, such as "ctx.entity".
+	// Each becomes an import from module starc_host; the leading names
+	// are predeclared modules.
+	Host []string
+	// NoWASI removes all WASI imports; print goes to the host.
+	NoWASI bool
 }
 
 // Error is a compilation error at a source position.
@@ -80,11 +86,20 @@ type compiler struct {
 	specs   []uint32 // specs with recursion guards
 	reach   *reach
 	nfunc   int
+	host    map[string]*hostNode // predeclared host names
 }
 
 // Compile compiles a Starlark file to a WebAssembly binary.
 func Compile(filename string, src []byte, opts Options) (out []byte, err error) {
 	c := &compiler{opts: opts}
+	if opts.Command && opts.NoWASI {
+		return nil, errors.New("a command module requires WASI")
+	}
+	host, err := hostTree(opts.Host)
+	if err != nil {
+		return nil, err
+	}
+	c.host = host
 	defer func() {
 		if r := recover(); r != nil {
 			if el, ok := r.(ErrorList); ok {
@@ -102,7 +117,7 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		return nil, fmt.Errorf("internal error: prelude: %w", err)
 	}
 	m := &Module{ExportMemory: "memory", Names: opts.Names}
-	r := rt.New(m, rt.Config{Command: opts.Command})
+	r := rt.New(m, rt.Config{Command: opts.Command, NoWASI: opts.NoWASI})
 	c.m, c.r = m, r
 
 	preludeUniverse := func(name string) bool {
@@ -125,6 +140,9 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 	}
 	universe := func(name string) bool {
 		if name == "None" || name == "True" || name == "False" {
+			return true
+		}
+		if _, ok := c.host[name]; ok {
 			return true
 		}
 		if strings.HasPrefix(name, "_") {
@@ -222,11 +240,15 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 	initF.Add(Call(static))
 	initF.Add(initBody...)
 
+	hostFuncs := append([]string{}, r.HostFuncs()...)
+	sort.Strings(hostFuncs)
 	payload, _ := json.Marshal(struct {
 		Version int          `json:"version"`
 		Model   string       `json:"model"`
 		Exports []exportMeta `json:"exports"`
-	}{1, map[bool]string{true: "command", false: "reactor"}[opts.Command], meta})
+		Host    []string     `json:"host,omitempty"`
+		NoWASI  bool         `json:"no_wasi,omitempty"`
+	}{1, map[bool]string{true: "command", false: "reactor"}[opts.Command], meta, hostFuncs, opts.NoWASI})
 	m.Customs = append(m.Customs, Custom{Name: MetaSection, Payload: payload})
 
 	return m.Encode()

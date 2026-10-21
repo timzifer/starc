@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -91,5 +92,54 @@ func TestDict(t *testing.T) {
 	}
 	if _, ok := d.Get("z"); ok {
 		t.Error("missing key found")
+	}
+}
+
+func TestDecodeCall(t *testing.T) {
+	b, err := EncodeCall([]any{int64(1), "x"}, NewDict("k", true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, kw, err := DecodeCall(b)
+	if err != nil || !reflect.DeepEqual(args, []any{int64(1), "x"}) || !reflect.DeepEqual(kw, NewDict("k", true)) {
+		t.Errorf("DecodeCall = %#v, %#v, %v", args, kw, err)
+	}
+	b, _ = EncodeCall(nil, nil)
+	if args, kw, err := DecodeCall(b); err != nil || len(args) != 0 || kw != nil {
+		t.Errorf("DecodeCall(()) = %#v, %#v, %v", args, kw, err)
+	}
+	for _, bad := range [][]byte{
+		nil,
+		{TagNone},
+		append(must(Encode(Tuple{})), TagNone),
+		append(must(Encode(Tuple{})), must(Encode(NewDict(int64(1), int64(2))))...),
+		append(must(EncodeCall(nil, NewDict("k", 1))), TagNone),
+	} {
+		if _, _, err := DecodeCall(bad); err == nil {
+			t.Errorf("DecodeCall(%v) succeeded", bad)
+		}
+	}
+}
+
+func must(b []byte, err error) []byte {
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+func TestDecodeDepth(t *testing.T) {
+	nested := func(depth int) []byte {
+		var b []byte
+		for i := 0; i < depth; i++ {
+			b = append(b, TagList, 1, 0, 0, 0)
+		}
+		return append(b, TagNone)
+	}
+	if _, err := Decode(nested(MaxDepth)); err != nil {
+		t.Errorf("depth %d: %v", MaxDepth, err)
+	}
+	if _, err := Decode(nested(MaxDepth + 1)); err == nil || !strings.Contains(err.Error(), "nested") {
+		t.Errorf("depth %d: err = %v", MaxDepth+1, err)
 	}
 }

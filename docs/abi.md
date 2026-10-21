@@ -9,17 +9,34 @@ custom section; this is version 1.
 Modules use WebAssembly 2.0 core features only: mutable globals,
 sign-extension operators, non-trapping float-to-int conversions and bulk
 memory (`memory.copy`, `memory.fill`). One linear memory and one function
-table are defined; nothing else is imported besides WASI.
+table are defined; nothing is imported besides the functions below.
 
 ## Imports
 
-Only functions from `wasi_snapshot_preview1` are imported, and only when
-needed:
+Functions are imported only when the program needs them. From
+`wasi_snapshot_preview1`:
 
 | Import | Used for |
 |---|---|
 | `fd_write` | `print` (stdout, fd 1) and error output in command modules (fd 2) |
 | `proc_exit` | terminating a command module after an error |
+
+From `starc_host`, if the program calls host functions (see
+[Host functions](#host-functions)) or was built without WASI:
+
+| Import | Signature | Used for |
+|---|---|---|
+| *name* | `(ptr: i32, len: i32) -> i32` | one import per host function, under its dotted name, e.g. `ctx.entity` |
+| `starc_result` | `(dst: i32) -> ()` | copies the pending outcome of the last host call to `dst` |
+| `starc_print` | `(ptr: i32, len: i32) -> ()` | `print` without WASI: the UTF-8 text of one line, including the trailing newline |
+
+### Modules without WASI
+
+With `Options.NoWASI` (`-no-wasi`) a module imports nothing outside
+`starc_host`: `print` calls `starc_print`, and errors are reported only
+through `starc_error`. This profile is available for reactor modules
+only. `starc.meta` then contains `"no_wasi": true`, and package `host`
+rejects such a module if it imports anything from WASI.
 
 ## Execution models
 
@@ -69,6 +86,46 @@ an integer overflow, …) traps. Afterwards, `starc_error()` returns the
 error message as a packed pointer/length pair of UTF-8 bytes. The instance
 remains usable for further calls.
 
+The module decodes the argument buffer defensively: a value that does
+not fit into `len` bytes, an invalid tag or trailing bytes are Starlark
+errors (`abi: truncated value`, …), never reads beyond the buffer.
+
+## Host functions
+
+The embedder declares host functions at compile time (`Options.Host`,
+`-host`) by name: `now`, or dotted like `ctx.entity`. To the program, a
+plain name is a predeclared builtin. For a dotted name, the leading
+names are predeclared values of type `module` whose members are host
+functions and further modules:
+
+```python
+e = ctx.entity(id, detail = True)   # calls the import starc_host."ctx.entity"
+```
+
+A missing member such as `ctx.nope` is a compile error. Names must be
+identifiers separated by dots; `None`, `True`, `False` and names starting
+with `starc_` are reserved. Only host functions that the program
+references are imported.
+
+A call works like an export call in the other direction:
+
+1. The module encodes the arguments as for an export call (a tuple of
+   positional arguments, followed by a dict of keyword arguments if there
+   are any) into its arena and calls the import with `(ptr, len)`.
+2. The host decodes the arguments and runs the function. It keeps the
+   outcome pending and returns its length: `n >= 0` for an encoded result
+   of `n` bytes, or `^n` (that is, `-n - 1`) for a UTF-8 error message of
+   `n` bytes.
+3. The module reserves `n` bytes at `dst` and calls `starc_result(dst)`;
+   the host copies the pending bytes there and discards them.
+4. The module decodes the result, with the same checks as for call
+   arguments, or raises the error message as a Starlark error.
+
+The host must check that the buffers it reads and writes lie within
+linear memory; package `host` aborts the call with an error otherwise.
+Values that cannot be encoded (functions, modules, …) cannot be passed to
+a host function.
+
 ## Value encoding
 
 Every value starts with a one-byte tag. Multi-byte numbers are
@@ -97,12 +154,15 @@ The custom section `starc.meta` contains UTF-8 JSON:
 {
   "version": 1,
   "model": "reactor",
-  "exports": [{"name": "greet", "params": ["name", "punct"]}]
+  "exports": [{"name": "greet", "params": ["name", "punct"]}],
+  "host": ["ctx.entity", "ctx.now"],
+  "no_wasi": true
 }
 ```
 
 Parameter names of `*args` and `**kwargs` parameters are prefixed with
-`*` and `**`.
+`*` and `**`. `host` lists the imported host functions and is omitted if
+there are none; `no_wasi` is omitted for modules that may import WASI.
 
 ## Example: JavaScript host
 

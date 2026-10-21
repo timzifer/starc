@@ -362,6 +362,9 @@ func (fc *fcomp) ident(id *syntax.Ident) Expr {
 			return r.FalseV()
 		}
 		if !fc.u.prelude {
+			if n, ok := fc.c.host[id.Name]; ok {
+				return fc.c.hostExpr(n)
+			}
 			if g, ok := fc.c.prelude.byName[id.Name]; ok {
 				return GGet(g)
 			}
@@ -488,6 +491,9 @@ func (fc *fcomp) expr(e syntax.Expr) Expr {
 		return r.Call("slice", fc.expr(e.X), opt(e.Lo), opt(e.Hi), opt(e.Step))
 
 	case *syntax.DotExpr:
+		if n, ok := fc.c.hostRef(e); ok {
+			return fc.c.hostExpr(n)
+		}
 		return r.Call("attr", fc.expr(e.X), I32c(int32(r.MethodID(e.Name.Name))))
 
 	case *syntax.CallExpr:
@@ -557,7 +563,9 @@ func (fc *fcomp) call(e *syntax.CallExpr) Expr {
 	var code Seq
 	fnT := fc.tmp()
 	var recv Expr
-	if dot, ok := e.Fn.(*syntax.DotExpr); ok {
+	if n, ok := fc.c.hostRef(e.Fn); ok {
+		code = append(code, Set(fnT, fc.c.hostExpr(n)))
+	} else if dot, ok := e.Fn.(*syntax.DotExpr); ok {
 		rv := fc.tmp()
 		code = append(code,
 			Set(rv, fc.expr(dot.X)),
@@ -610,7 +618,15 @@ func (fc *fcomp) call(e *syntax.CallExpr) Expr {
 		}
 		kw = Get(d)
 	}
-	// For a method call, args[0] is the receiver.
+	// For a method call, args[0] is the receiver, unless it is a module.
+	if recv != nil {
+		return append(code, Raw(func() Expr {
+			if r.HasModules() {
+				return r.Call("call_method", Get(fnT), Get(args), kw)
+			}
+			return r.Call("call", Get(fnT), Get(args), kw)
+		}))
+	}
 	return append(code, r.Call("call", Get(fnT), Get(args), kw))
 }
 
