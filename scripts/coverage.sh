@@ -34,6 +34,18 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 fi
 
 echo "HTML report: $html"
+
+# shields.io endpoint description for the README badge; written before the
+# threshold check, so a failing run still reports the real value.
+badge="${profile%.*}-badge.json"
+color="$(awk -v t="$total" -v m="$min" 'BEGIN {
+  if (t + 0 < m + 0) print "red"
+  else if (t + 0 >= 90) print "brightgreen"
+  else print "green"
+}')"
+printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"%s"}\n' "$total" "$color" > "$badge"
+echo "Badge: $badge"
+
 if awk -v t="$total" -v m="$min" 'BEGIN { exit !(t + 0 < m + 0) }'; then
   echo "coverage ${total}% is below the minimum of ${min}%" >&2
   exit 1
