@@ -15,6 +15,7 @@ import (
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/sys"
 	"go.starlark.net/starlark"
+	"go.starlark.net/starlarkstruct"
 	"go.starlark.net/syntax"
 )
 
@@ -50,7 +51,10 @@ func interpret(name, src string) (string, error) {
 	var out strings.Builder
 	thread := &starlark.Thread{Print: func(_ *starlark.Thread, msg string) { out.WriteString(msg + "\n") }}
 	thread.SetMaxExecutionSteps(1e8)
-	_, err := starlark.ExecFileOptions(&testDialect, thread, name, src, nil)
+	_, err := starlark.ExecFileOptions(&testDialect, thread, name, src, starlark.StringDict{
+		// Embedders of go.starlark.net usually predeclare struct.
+		"struct": starlark.NewBuiltin("struct", starlarkstruct.Make),
+	})
 	return out.String(), err
 }
 
@@ -70,7 +74,7 @@ func newRuntime(t testing.TB, cfg wazero.RuntimeConfig) wazero.Runtime {
 
 // execute compiles src and runs it as a WASI command, with a deadline.
 func execute(t *testing.T, rt wazero.Runtime, name, src string, fuel bool) (string, string, error) {
-	bin, err := Compile(name, []byte(src), Options{Command: true, Names: true, Dialect: testDialect, Fuel: fuel})
+	bin, err := Compile(name, []byte(src), Options{Command: true, Names: true, Dialect: testDialect, Fuel: fuel, Struct: true})
 	if err != nil {
 		t.Fatalf("%s: compile: %v", name, err)
 	}

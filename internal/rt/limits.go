@@ -63,6 +63,17 @@ func (r *RT) Enter() Expr {
 // LeaveCall yields code that leaves a call entered with Enter.
 func (r *RT) LeaveCall() Expr { return GSet(r.Depth, sub(GGet(r.Depth), c32(1))) }
 
+// maxCount bounds the number of elements of a container, so that their
+// byte sizes cannot wrap around in i32 arithmetic. Such a container
+// would not fit into memory anyway.
+const maxCount = 1 << 28
+
+// checkCount yields code that fails with "out of memory" if the element
+// count n (treated as unsigned) exceeds maxCount.
+func (r *RT) checkCount(n Expr) Expr {
+	return If(I32GtU(n, c32(maxCount)), r.Call("out_of_memory"))
+}
+
 // checkSize yields code that fails with msg (code ErrSize) if the size n
 // exceeds limit; it is empty for limit 0.
 func (r *RT) checkSize(n Expr, limit uint32, msg string) Expr {

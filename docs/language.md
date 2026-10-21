@@ -9,8 +9,9 @@ runs every program with both implementations and compares the results.
 ## Supported
 
 **Types:** `NoneType`, `bool`, `int` (64-bit), `float`, `string`, `list`,
-`tuple`, `dict`, `range`, `function`, `builtin_function_or_method`,
-`module` (predeclared host modules, see below).
+`tuple`, `dict`, `set` (with `Dialect.Set`), `range`, `function`,
+`builtin_function_or_method`, `struct`, `module` (predeclared host
+modules) and opaque host values; see below.
 
 **Expressions:** literals (string, int, float, list, tuple, dict),
 arithmetic `+ - * / // %`, bitwise `& | ^ ~ << >>`, comparisons, `in` /
@@ -33,7 +34,8 @@ limited to `MaxMemoryPages`; see [abi.md](abi.md#limits).
 
 **Dialect options** (`starc.Dialect` / CLI flags): `While` (`while`
 loops), `TopLevelControl` (`if`/`for`/`while` at top level),
-`GlobalReassign`, `Recursion`.
+`GlobalReassign`, `Recursion`, `Set` (the `set` type and builtin, as
+`FileOptions.Set` in go.starlark.net).
 
 **Host functions** (`starc.Options.Host` / `-host`) are predeclared
 builtins implemented by the embedder. A dotted name such as `ctx.entity`
@@ -42,6 +44,24 @@ in go.starlark.net: `type(ctx)` is `"module"`, `str(ctx)` is
 `<module "ctx">`, members are accessible with `.`, `getattr`, `hasattr`
 and `dir`, and modules are unhashable. See
 [abi.md](abi.md#host-functions).
+
+**Structs** behave like go.starlark.net's `starlarkstruct.Struct`: named,
+immutable fields sorted by name, accessed with `.`, `getattr`, `hasattr`
+and `dir`; `str(s)` is `struct(a = 1, b = "x")`; structs compare equal
+field by field and are hashable if their fields are. A field that holds
+a function is called without a receiver (`s.f(x)`). The host can pass
+structs in and receive them (`abi.Struct`); the builtin `struct(**kwargs)`
+is available with `Options.Struct` (`-struct`), since embedders of
+go.starlark.net usually predeclare `starlarkstruct.Make` as `struct`.
+
+**Opaque host values** (`abi.Opaque`) model custom value types of an
+embedder, such as actions or wake-ups that a program constructs through
+host functions and returns. The host chooses the type name (`type(v)`),
+the string form (`str(v)`, `repr(v)`), whether the value is false in a
+boolean context and whether it is hashable. The program cannot look into
+the payload: two opaque values are equal if their types and payloads
+are equal, and the value returns to the host unchanged. They have no
+attributes and do not support ordering.
 
 ### Built-in functions
 
@@ -61,15 +81,18 @@ and `dir`, and modules are unhashable. See
 * **list:** `append`, `clear`, `extend`, `index`, `insert`, `pop`, `remove`
 * **dict:** `clear`, `get`, `items`, `keys`, `pop`, `popitem`,
   `setdefault`, `update`, `values`
+* **set:** `add`, `clear`, `difference`, `discard`, `intersection`,
+  `issubset`, `issuperset`, `pop`, `remove`, `symmetric_difference`,
+  `union`, `update`; operators `|`, `&`, `-`, `^` and the subset
+  comparisons `<`, `<=`, `>`, `>=`
 
 ## Not supported (compile-time errors)
 
 * `load` statements
-* `set` and the `set` type
 * bytes literals and the `bytes` type
 * integer literals that do not fit in 64 bits
 
-### Floats and NaN
+## Floats and NaN
 
 The bit pattern of a NaN produced by WebAssembly arithmetic differs
 between platforms (and between operations), and it is observable: it
@@ -90,7 +113,10 @@ arithmetic and such values passed in by the host, fails with
 ## Deviations from go.starlark.net
 
 * **Integers are 64-bit.** Arithmetic that overflows is a run-time error
-  (`int overflow`) instead of producing a big integer.
+  (`int overflow`) instead of producing a big integer. Hosts that use
+  unsigned 64-bit IDs (`starlark.MakeUint64` in go.starlark.net) must keep
+  them below 2^63, since `abi.Encode` rejects larger integers, or pass
+  them as strings or opaque values.
 * `str(float)` and `float(string)` match the reference exactly (shortest
   round-trip formatting, correctly rounded parsing). `%e`/`%f` formatting
   supports magnitudes below about 9.2e18.

@@ -13,6 +13,9 @@
 //	6 list    uint32 count, values
 //	7 tuple   uint32 count, values
 //	8 dict    uint32 count, key/value pairs
+//	9 struct  uint32 count, fields: uint32 name length, name bytes, value
+//	10 opaque uint8 flags, then type name, string form and payload,
+//	          each as uint32 length and bytes
 //
 // The arguments of a call are an encoded tuple of positional arguments,
 // optionally followed by an encoded dict of keyword arguments.
@@ -20,8 +23,9 @@
 // Go values map to Starlark values as follows: nil ↔ None, bool ↔ bool,
 // signed and unsigned integers → int (decoded as int64), float32 and
 // float64 → float (decoded as float64), string ↔ string, []any ↔ list,
-// [Tuple] ↔ tuple, *[Dict] ↔ dict. Maps with string keys are encoded as
-// dicts with sorted keys.
+// [Tuple] ↔ tuple, *[Dict] ↔ dict, *[Struct] ↔ struct, *[Opaque] ↔ an
+// opaque host value. Maps with string keys are encoded as dicts with
+// sorted keys.
 package abi
 
 import (
@@ -35,16 +39,69 @@ import (
 
 // Tags of encoded values.
 const (
-	TagNone  = 0
-	TagFalse = 1
-	TagTrue  = 2
-	TagInt   = 3
-	TagFloat = 4
-	TagStr   = 5
-	TagList  = 6
-	TagTuple = 7
-	TagDict  = 8
+	TagNone   = 0
+	TagFalse  = 1
+	TagTrue   = 2
+	TagInt    = 3
+	TagFloat  = 4
+	TagStr    = 5
+	TagList   = 6
+	TagTuple  = 7
+	TagDict   = 8
+	TagStruct = 9
+	TagOpaque = 10
 )
+
+// Flags of an encoded [Opaque] value.
+const (
+	OpaqueFalsy      = 1
+	OpaqueUnhashable = 2
+)
+
+// Struct is a Starlark struct: immutable named fields, as created by
+// starlarkstruct in go.starlark.net. Decoded structs have their fields
+// sorted by name; field names must be unique.
+type Struct struct {
+	Fields []Field
+}
+
+// Field is a named field of a [Struct].
+type Field struct {
+	Name  string
+	Value any
+}
+
+// NewStruct returns a struct with the given alternating names and
+// values, sorted by name.
+func NewStruct(kv ...any) *Struct {
+	s := &Struct{}
+	for i := 0; i+1 < len(kv); i += 2 {
+		s.Fields = append(s.Fields, Field{kv[i].(string), kv[i+1]})
+	}
+	sort.SliceStable(s.Fields, func(i, j int) bool { return s.Fields[i].Name < s.Fields[j].Name })
+	return s
+}
+
+// Get returns the value of the named field.
+func (s *Struct) Get(name string) (any, bool) {
+	for _, f := range s.Fields {
+		if f.Name == name {
+			return f.Value, true
+		}
+	}
+	return nil, false
+}
+
+// Opaque is a host value that a program can hold, compare, hash and pass
+// back, but not look into, such as an action or a handle. Two opaque
+// values are equal if their types and payloads are equal.
+type Opaque struct {
+	Type       string // the result of type(v)
+	Repr       string // the result of str(v) and repr(v)
+	Payload    []byte // data for the host only
+	Falsy      bool   // v is false in a boolean context (it is true by default)
+	Unhashable bool   // v cannot be a dict key or set element
+}
 
 // Tuple is a Starlark tuple.
 type Tuple []any
@@ -158,6 +215,14 @@ func Append(b []byte, v any) ([]byte, error) {
 		return appendDict(b, v)
 	case Dict:
 		return appendDict(b, &v)
+	case *Struct:
+		return appendStruct(b, v)
+	case Struct:
+		return appendStruct(b, &v)
+	case *Opaque:
+		return appendOpaque(b, v), nil
+	case Opaque:
+		return appendOpaque(b, &v), nil
 	case map[string]any:
 		keys := make([]string, 0, len(v))
 		for k := range v {
@@ -217,6 +282,39 @@ func appendDict(b []byte, d *Dict) ([]byte, error) {
 	return b, nil
 }
 
+func appendStruct(b []byte, s *Struct) ([]byte, error) {
+	b = append(b, TagStruct)
+	b = binary.LittleEndian.AppendUint32(b, uint32(len(s.Fields)))
+	var err error
+	for _, f := range s.Fields {
+		b = appendRaw(b, f.Name)
+		if b, err = Append(b, f.Value); err != nil {
+			return nil, err
+		}
+	}
+	return b, nil
+}
+
+func appendOpaque(b []byte, o *Opaque) []byte {
+	var flags byte
+	if o.Falsy {
+		flags |= OpaqueFalsy
+	}
+	if o.Unhashable {
+		flags |= OpaqueUnhashable
+	}
+	b = append(b, TagOpaque, flags)
+	b = appendRaw(b, o.Type)
+	b = appendRaw(b, o.Repr)
+	return appendRaw(b, string(o.Payload))
+}
+
+// appendRaw appends a uint32 length and the bytes of s.
+func appendRaw(b []byte, s string) []byte {
+	b = binary.LittleEndian.AppendUint32(b, uint32(len(s)))
+	return append(b, s...)
+}
+
 // DecodeCall decodes call arguments encoded by [EncodeCall]: a tuple of
 // positional arguments, optionally followed by a dict of keyword
 // arguments with string keys. kwargs is nil if there are none.
@@ -263,6 +361,19 @@ func Decode(b []byte) (any, error) {
 	return v, nil
 }
 
+// raw reads a uint32 length and that many bytes.
+func raw(b []byte) (string, []byte, bool) {
+	if len(b) < 4 {
+		return "", nil, false
+	}
+	n := binary.LittleEndian.Uint32(b)
+	b = b[4:]
+	if uint64(len(b)) < uint64(n) {
+		return "", nil, false
+	}
+	return string(b[:n]), b[n:], true
+}
+
 // MaxDepth is the maximum nesting depth of lists, tuples and dicts that
 // the decoder accepts, so that untrusted input cannot exhaust the stack.
 const MaxDepth = 10000
@@ -276,6 +387,26 @@ func decodePrefix(b []byte, depth int) (any, []byte, error) {
 		return nil, nil, ErrTruncated
 	}
 	tag, b := b[0], b[1:]
+	if tag == TagOpaque {
+		if len(b) < 1 {
+			return nil, nil, ErrTruncated
+		}
+		o := &Opaque{Falsy: b[0]&OpaqueFalsy != 0, Unhashable: b[0]&OpaqueUnhashable != 0}
+		b = b[1:]
+		var payload string
+		var ok bool
+		if o.Type, b, ok = raw(b); !ok {
+			return nil, nil, ErrTruncated
+		}
+		if o.Repr, b, ok = raw(b); !ok {
+			return nil, nil, ErrTruncated
+		}
+		if payload, b, ok = raw(b); !ok {
+			return nil, nil, ErrTruncated
+		}
+		o.Payload = []byte(payload)
+		return o, b, nil
+	}
 	switch tag {
 	case TagNone:
 		return nil, b, nil
@@ -322,6 +453,30 @@ func decodePrefix(b []byte, depth int) (any, []byte, error) {
 			return Tuple(xs), b, nil
 		}
 		return xs, b, nil
+	case TagStruct:
+		if uint64(len(b)) < 5*uint64(n) {
+			return nil, nil, ErrTruncated
+		}
+		s := &Struct{}
+		for i := uint32(0); i < n; i++ {
+			var f Field
+			var ok bool
+			if f.Name, b, ok = raw(b); !ok {
+				return nil, nil, ErrTruncated
+			}
+			var err error
+			if f.Value, b, err = decodePrefix(b, depth+1); err != nil {
+				return nil, nil, err
+			}
+			s.Fields = append(s.Fields, f)
+		}
+		sort.SliceStable(s.Fields, func(i, j int) bool { return s.Fields[i].Name < s.Fields[j].Name })
+		for i := 1; i < len(s.Fields); i++ {
+			if s.Fields[i].Name == s.Fields[i-1].Name {
+				return nil, nil, fmt.Errorf("abi: duplicate struct field %q", s.Fields[i].Name)
+			}
+		}
+		return s, b, nil
 	case TagDict:
 		if uint64(len(b)) < 2*uint64(n) {
 			return nil, nil, ErrTruncated

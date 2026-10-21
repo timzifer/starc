@@ -638,10 +638,11 @@ func (fc *fcomp) call(e *syntax.CallExpr) Expr {
 		}
 		kw = Get(d)
 	}
-	// For a method call, args[0] is the receiver, unless it is a module.
+	// For a method call, args[0] is the receiver, unless it is a module
+	// or a struct.
 	if recv != nil {
 		return append(code, Raw(func() Expr {
-			if r.HasModules() {
+			if r.HasModules() || fc.c.structsPossible() {
 				return r.Call("call_method", Get(fnT), Get(args), kw)
 			}
 			return r.Call("call", Get(fnT), Get(args), kw)

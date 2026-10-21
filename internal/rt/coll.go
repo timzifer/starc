@@ -11,6 +11,7 @@ func (r *RT) registerColl() {
 	r.define("tuple_new", p1, r1, func(f *Func) {
 		t := f.Local(I32)
 		f.Add(
+			r.checkCount(get(f.Param(0))),
 			Set(t, r.Call("alloc", add(c32(offTupElems), I32Shl(get(f.Param(0)), c32(2))))),
 			st(get(t), 0, c32(TTuple)),
 			st(get(t), offTupLen, get(f.Param(0))),
@@ -63,6 +64,7 @@ func (r *RT) registerColl() {
 	r.define("list_new", p1, r1, func(f *Func) {
 		l, c := f.Local(I32), f.Local(I32)
 		f.Add(
+			r.checkCount(get(f.Param(0))),
 			Set(c, Select(get(f.Param(0)), c32(4), gt(get(f.Param(0)), c32(4)))),
 			Set(l, r.Call("alloc", c32(sizeList))),
 			st(get(l), 0, c32(TList)),

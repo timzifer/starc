@@ -45,6 +45,8 @@ type Options struct {
 	Fuel bool
 	// FiniteFloats makes NaN and infinite floats errors.
 	FiniteFloats bool
+	// Struct provides the struct builtin.
+	Struct bool
 	// MaxMemoryPages is the maximum memory size in 64 KiB pages; 0 means
 	// rt.MaxMemoryPages.
 	MaxMemoryPages uint32
@@ -168,7 +170,7 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		if _, ok := c.host[name]; ok {
 			return true
 		}
-		if name == "set" && !opts.Dialect.Set {
+		if (name == "set" && !opts.Dialect.Set) || (name == "struct" && !opts.Struct) {
 			return false
 		}
 		if strings.HasPrefix(name, "_") {

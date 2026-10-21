@@ -53,9 +53,9 @@ starc run examples/wordcount.star count_words "a b a" 1
 
 Flags: `-o`, `-command`, `-export a,b`, `-no-names`, `-host ctx.entity,now`,
 `-no-wasi`, `-fuel`, `-budget N` (run), the limits `-max-pages`,
-`-max-depth`, `-max-input`, `-max-result`, `-finite-floats`, and the dialect flags
-`-while`, `-toplevel-control`, `-global-reassign`, `-recursion`. Run
-`starc help` for details.
+`-max-depth`, `-max-input`, `-max-result`, `-finite-floats`, `-struct`,
+and the dialect flags `-while`, `-toplevel-control`, `-global-reassign`,
+`-recursion`, `-set`. Run `starc help` for details.
 
 ## Go package
 
@@ -109,6 +109,12 @@ m, err := host.Load(ctx, wasm, &host.Config{Funcs: map[string]host.Func{
 
 The program calls `ctx.entity(7)`; an error returned by a host function
 becomes a Starlark error.
+
+Host functions can exchange structs (`abi.Struct`, read as `e.position`
+in the program) and opaque values (`abi.Opaque`): custom types such as
+actions that the program can hold, compare and return, but not look
+into. Together with `set` (`Dialect.Set`) and `struct()` (`Options.Struct`),
+programs written for go.starlark.net embedders compile unchanged.
 
 ### Fuel
 

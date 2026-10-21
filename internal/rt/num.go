@@ -391,7 +391,7 @@ func (r *RT) registerNum() {
 			If(ne(get(ta), get(tb)), Return(c32(0))),
 			// Containers are compared element-wise even if identical, so that
 			// cyclic values hit the depth limit as in Starlark.
-			If(and(eq(get(a), get(b)), not(or(or(eq(get(ta), c32(TList)), eq(get(ta), c32(TTuple))), eq(get(ta), c32(TDict))))),
+			If(and(eq(get(a), get(b)), not(or(or(eq(get(ta), c32(TList)), eq(get(ta), c32(TTuple))), or(eq(get(ta), c32(TDict)), eq(get(ta), c32(TStruct)))))),
 				Return(c32(1))),
 			If(eq(get(ta), c32(TString)), Return(r.Call("str_eq", get(a), get(b)))),
 			If(eq(get(ta), c32(TBool)), Return(eq(ld(get(a), offBool), ld(get(b), offBool)))),
@@ -405,6 +405,20 @@ func (r *RT) registerNum() {
 					If(not(r.Call("eq", ld(elem(get(pa), 0, get(i)), 0), ld(elem(get(pb), 0, get(i)), 0))),
 						Seq{r.Call("cmp_leave"), Return(c32(0))})),
 				r.Call("cmp_leave"),
+				Return(c32(1)),
+			}),
+			If(eq(get(ta), c32(TOpaque)), Return(and(r.Call("str_eq", ld(get(a), offOpqType), ld(get(b), offOpqType)),
+				r.Call("str_eq", ld(get(a), offOpqPayload), ld(get(b), offOpqPayload))))),
+			If(eq(get(ta), c32(TStruct)), Seq{
+				Set(n, ld(get(a), offStructLen)),
+				If(ne(get(n), ld(get(b), offStructLen)), Return(c32(0))),
+				Set(pa, ld(get(a), offStructFields)), Set(pb, ld(get(b), offStructFields)),
+				r.forRange(i, c32(0), get(n),
+					If(not(r.Call("str_eq", ld(add(get(pa), I32Shl(get(i), c32(3))), 0), ld(add(get(pb), I32Shl(get(i), c32(3))), 0))), Return(c32(0))),
+					r.Call("cmp_enter"),
+					Set(v, r.Call("eq", ld(add(get(pa), I32Shl(get(i), c32(3))), 4), ld(add(get(pb), I32Shl(get(i), c32(3))), 4))),
+					r.Call("cmp_leave"),
+					If(eqz(get(v)), Return(c32(0)))),
 				Return(c32(1)),
 			}),
 			If(eq(get(ta), c32(TSet)), Return(and(eq(ld(get(a), offDictLen), ld(get(b), offDictLen)),
@@ -463,6 +477,17 @@ func (r *RT) registerNum() {
 				Return(mix(I64Mul(I64ReinterpF64(get(fl)), I64c(-7046029254386353131)))),
 			}),
 			If(eq(get(t), c32(TNone)), Return(c32(0x1f2e3d4c))),
+			If(eq(get(t), c32(TOpaque)), Seq{
+				If(and(ld(get(v), offOpqFlags), c32(OpaqueUnhashable)), r.Fail("unhashable type: ", r.TypeName(get(v)))),
+				Return(add(mul(r.Call("str_hash", ld(get(v), offOpqType)), c32(31)), r.Call("str_hash", ld(get(v), offOpqPayload)))),
+			}),
+			If(eq(get(t), c32(TStruct)), Seq{
+				Set(h, c32(0x5bd1e995)),
+				r.forRange(i, c32(0), ld(get(v), offStructLen),
+					Set(h, add(mul(I32Xor(get(h), r.Call("str_hash", ld(add(ld(get(v), offStructFields), I32Shl(get(i), c32(3))), 0))), c32(1000003)),
+						r.Call("hash", ld(add(ld(get(v), offStructFields), I32Shl(get(i), c32(3))), 4))))),
+				Return(get(h)),
+			}),
 			If(eq(get(t), c32(TBool)), Return(add(ld(get(v), offBool), c32(0x5a5a)))),
 			If(eq(get(t), c32(TTuple)), Seq{
 				Set(h, c32(0x345678)),

@@ -6,15 +6,17 @@ import (
 
 // ABI value tags. See docs/abi.md.
 const (
-	ABINone  = 0
-	ABIFalse = 1
-	ABITrue  = 2
-	ABIInt   = 3
-	ABIFloat = 4
-	ABIStr   = 5
-	ABIList  = 6
-	ABITuple = 7
-	ABIDict  = 8
+	ABINone   = 0
+	ABIFalse  = 1
+	ABITrue   = 2
+	ABIInt    = 3
+	ABIFloat  = 4
+	ABIStr    = 5
+	ABIList   = 6
+	ABITuple  = 7
+	ABIDict   = 8
+	ABIStruct = 9
+	ABIOpaque = 10
 )
 
 func (r *RT) registerABI() {
@@ -61,7 +63,15 @@ func (r *RT) registerABI() {
 			If(eq(get(t), c32(ABITrue)), Return(r.TrueV())),
 			If(eq(get(t), c32(ABIInt)), Seq{need(c32(8)), Set(o, r.Call("int", I64Load(cur(), 0))), adv(c32(8)), Return(get(o))}),
 			If(eq(get(t), c32(ABIFloat)), Seq{need(c32(8)), Set(o, r.Call("float", F64Load(cur(), 0))), adv(c32(8)), Return(get(o))}),
-			If(gt(get(t), c32(ABIDict)), r.Fail("abi: invalid value tag ", r.Call("i64_to_str", I64ExtendI32U(get(t))))),
+			If(gt(get(t), c32(ABIOpaque)), r.Fail("abi: invalid value tag ", r.Call("i64_to_str", I64ExtendI32U(get(t))))),
+			If(eq(get(t), c32(ABIOpaque)), Seq{
+				need(c32(1)),
+				Set(n, I32Load8U(cur(), 0)),
+				adv(c32(1)),
+				Set(k, r.Call("decode_str")),
+				Set(o, r.Call("decode_str")),
+				Return(r.Call("opaque_new", get(k), get(o), r.Call("decode_str"), and(get(n), c32(OpaqueFalsy|OpaqueUnhashable)))),
+			}),
 			need(c32(4)),
 			Set(n, ld(cur(), 0)),
 			adv(c32(4)),
@@ -73,6 +83,15 @@ func (r *RT) registerABI() {
 				r.forRange(i, c32(0), get(n), st(elem(get(o), offTupElems, get(i)), 0, r.Call("decode"))),
 				Return(IfV(I32, eq(get(t), c32(ABIList)), r.Call("list_of", get(o)), get(o))),
 			}),
+			If(eq(get(t), c32(ABIStruct)), Seq{
+				// Each field takes at least five bytes.
+				If(I32GtU(get(n), I32DivU(sub(GGet(r.CurEnd), cur()), c32(5))), r.Fail("abi: truncated value")),
+				Set(o, r.Call("struct_new", get(n))),
+				r.forRange(i, c32(0), get(n),
+					Set(k, r.Call("decode_str")),
+					r.Call("struct_put", get(o), get(k), r.Call("decode"))),
+				Return(get(o)),
+			}),
 			// dict: each entry takes at least two bytes.
 			If(I32GtU(get(n), I32ShrU(sub(GGet(r.CurEnd), cur()), c32(1))), r.Fail("abi: truncated value")),
 			Set(o, r.Call("dict_new")),
@@ -80,6 +99,22 @@ func (r *RT) registerABI() {
 				Set(k, r.Call("decode")),
 				r.Call("dict_set", get(o), get(k), r.Call("decode"))),
 			get(o),
+		)
+	})
+	// decode_str() -> string read at the cursor as u32 length and bytes
+	r.define("decode_str", p0, r1, func(f *Func) {
+		n, s := f.Local(I32), f.Local(I32)
+		need := func(n Expr) Expr {
+			return If(I32GtU(n, sub(GGet(r.CurEnd), GGet(r.Cursor))), r.Fail("abi: truncated value"))
+		}
+		f.Add(
+			need(c32(4)),
+			Set(n, ld(GGet(r.Cursor), 0)),
+			GSet(r.Cursor, add(GGet(r.Cursor), c32(4))),
+			need(get(n)),
+			Set(s, r.Call("str_from", GGet(r.Cursor), get(n))),
+			GSet(r.Cursor, add(GGet(r.Cursor), get(n))),
+			get(s),
 		)
 	})
 	// decode_buf(ptr, n) -> the single value encoded in [ptr, ptr+n)
@@ -131,6 +166,15 @@ func (r *RT) registerABI() {
 						r.Call("size_add", r.Call("enc_size", ld(get(e), 4)), r.Call("enc_size", ld(get(e), 8))))))),
 				Return(get(s)),
 			}),
+			If(eq(get(t), c32(TStruct)), Seq{
+				Set(s, c32(5)),
+				r.forRange(i, c32(0), ld(get(v), offStructLen),
+					Set(e, add(ld(get(v), offStructFields), I32Shl(get(i), c32(3)))),
+					Set(s, r.Call("size_add", get(s), r.Call("size_add", add(c32(4), slen(ld(get(e), 0))), r.Call("enc_size", ld(get(e), 4)))))),
+				Return(get(s)),
+			}),
+			If(eq(get(t), c32(TOpaque)), Return(r.Call("size_add", c32(14),
+				r.Call("size_add", slen(ld(get(v), offOpqType)), r.Call("size_add", slen(ld(get(v), offOpqRepr)), slen(ld(get(v), offOpqPayload))))))),
 			r.Fail("cannot pass value of type ", r.TypeName(get(v)), " to the host"),
 		)
 	})
@@ -169,11 +213,37 @@ func (r *RT) registerABI() {
 				r.forRange(i, c32(0), get(n), r.Call("encode", ld(elem(r.Call("seq_base", get(v)), 0, get(i)), 0))),
 				Return(nil),
 			}),
+			If(eq(get(t), c32(TStruct)), Seq{
+				putTag(c32(ABIStruct)),
+				st(cur(), 0, ld(get(v), offStructLen)), adv(c32(4)),
+				r.forRange(i, c32(0), ld(get(v), offStructLen),
+					Set(e, add(ld(get(v), offStructFields), I32Shl(get(i), c32(3)))),
+					r.Call("encode_str", ld(get(e), 0)),
+					r.Call("encode", ld(get(e), 4))),
+				Return(nil),
+			}),
+			If(eq(get(t), c32(TOpaque)), Seq{
+				putTag(c32(ABIOpaque)),
+				I32Store8(cur(), 0, ld(get(v), offOpqFlags)), adv(c32(1)),
+				r.Call("encode_str", ld(get(v), offOpqType)),
+				r.Call("encode_str", ld(get(v), offOpqRepr)),
+				r.Call("encode_str", ld(get(v), offOpqPayload)),
+				Return(nil),
+			}),
 			putTag(c32(ABIDict)),
 			st(cur(), 0, ld(get(v), offDictLen)), adv(c32(4)),
 			r.forRange(i, c32(0), ld(get(v), offDictUsed),
 				Set(e, add(ld(get(v), offDictEntries), mul(get(i), c32(12)))),
 				If(ld(get(e), 4), Seq{r.Call("encode", ld(get(e), 4)), r.Call("encode", ld(get(e), 8))})),
+		)
+	})
+	// encode_str(s): writes the u32 length and the bytes of s at the cursor
+	r.define("encode_str", p1, r0, func(f *Func) {
+		s := f.Param(0)
+		f.Add(
+			st(GGet(r.Cursor), 0, slen(get(s))),
+			r.memcopy(add(GGet(r.Cursor), c32(4)), sbytes(get(s)), slen(get(s))),
+			GSet(r.Cursor, add(GGet(r.Cursor), add(c32(4), slen(get(s))))),
 		)
 	})
 	// abi_result(v) -> packed (ptr | len<<32) of the encoded value

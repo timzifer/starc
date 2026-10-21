@@ -293,6 +293,12 @@ func (r *RT) registerBuiltins() {
 		f.Add(
 			r.checkArgs("getattr", args, kw, 2, 3),
 			If(not(isTag(arg(args, 1), TString)), r.Fail("getattr: attribute name must be a string")),
+			If(isTag(arg(args, 0), TStruct), Seq{
+				Set(id, r.Call("struct_get", arg(args, 0), arg(args, 1))),
+				If(get(id), Return(get(id))),
+				If(eq(nargs(args), c32(3)), Return(arg(args, 2))),
+				r.Call("no_field", arg(args, 0), arg(args, 1)),
+			}),
 			Set(id, r.Call("method_id", arg(args, 1))),
 			If(and(ge(get(id), c32(0)), ne(r.Call("method_lookup", arg(args, 0), get(id)), c32(0))),
 				Return(r.Call("attr", arg(args, 0), get(id)))),
@@ -305,6 +311,7 @@ func (r *RT) registerBuiltins() {
 		f.Add(
 			r.checkArgs("hasattr", args, kw, 2, 2),
 			If(not(isTag(arg(args, 1), TString)), r.Fail("hasattr: attribute name must be a string")),
+			If(isTag(arg(args, 0), TStruct), Return(r.bool(ne(r.Call("struct_get", arg(args, 0), arg(args, 1)), c32(0))))),
 			Set(id, r.Call("method_id", arg(args, 1))),
 			r.bool(and(ge(get(id), c32(0)), ne(r.Call("method_lookup", arg(args, 0), get(id)), c32(0)))),
 		)
@@ -313,6 +320,7 @@ func (r *RT) registerBuiltins() {
 		l, i := f.Local(I32), f.Local(I32)
 		f.Add(
 			r.checkArgs("dir", args, kw, 1, 1),
+			If(isTag(arg(args, 0), TStruct), Return(r.Call("struct_names", arg(args, 0)))),
 			Set(l, r.Call("list_new", c32(0))),
 			Raw(func() Expr {
 				return r.forRange(i, c32(0), c32(len(r.methodNames)),

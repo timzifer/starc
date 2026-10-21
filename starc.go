@@ -92,6 +92,10 @@ type Options struct {
 	// it, NaN is always canonicalized to a single bit pattern (see
 	// docs/language.md).
 	FiniteFloats bool
+	// Struct provides the builtin struct(**kwargs), as embedders of
+	// go.starlark.net usually predeclare it (starlarkstruct.Make). Struct
+	// values from the host are available without it.
+	Struct bool
 }
 
 // maxCallDepth bounds Options.MaxCallDepth; no engine supports deeper
@@ -183,6 +187,7 @@ func Compile(filename string, src []byte, opts *Options) ([]byte, error) {
 		MaxInputBytes:  opts.MaxInputBytes,
 		MaxResultBytes: opts.MaxResultBytes,
 		FiniteFloats:   opts.FiniteFloats,
+		Struct:         opts.Struct,
 		Dialect: syntax.FileOptions{
 			While:           opts.Dialect.While,
 			TopLevelControl: opts.Dialect.TopLevelControl,
