@@ -49,6 +49,20 @@ Each chunk runs with the reference interpreter and as compiled
 WebAssembly, and the printed output must match. A chunk may end with an
 error, in which case both implementations must fail after the same output.
 
+Fuzz targets run nightly in CI and can be run locally, one at a time:
+
+```sh
+go test -run '^$' -fuzz '^FuzzPrograms$' -fuzztime 5m ./internal/compiler/
+```
+
+`FuzzPrograms` generates whole programs, `FuzzStrings` and `FuzzNumbers`
+check built-ins on arbitrary values, all comparing against the reference
+interpreter; `FuzzCompile` checks that arbitrary source never crashes the
+compiler, and `FuzzDecode` and `FuzzDecodeCall` (in `abi`) check the
+decoder. A failing
+input is saved under `testdata/fuzz/` in the package and then runs as part
+of `go test`; fix the bug and commit the input as a regression test.
+
 ## Pull requests
 
 * Keep changes focused; one topic per pull request.

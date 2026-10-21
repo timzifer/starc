@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,8 +57,12 @@ func interpret(name, src string) (string, error) {
 // newTestRuntime returns a wazero runtime with WASI whose modules stop
 // when their context is done.
 func newTestRuntime(t testing.TB) wazero.Runtime {
+	return newRuntime(t, wazero.NewRuntimeConfig())
+}
+
+func newRuntime(t testing.TB, cfg wazero.RuntimeConfig) wazero.Runtime {
 	ctx := context.Background()
-	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCloseOnContextDone(true))
+	rt := wazero.NewRuntimeWithConfig(ctx, cfg.WithCloseOnContextDone(true))
 	t.Cleanup(func() { rt.Close(ctx) })
 	wasi_snapshot_preview1.MustInstantiate(ctx, rt)
 	return rt
@@ -93,33 +98,59 @@ func TestConformance(t *testing.T) {
 				// Fuel metering (with an unlimited budget) must not change
 				// the behavior.
 				for _, fuel := range []bool{false, true} {
-					checkConformance(t, rt, c, want, werr, fuel)
+					got, stderr, gerr := execute(t, rt, c.name, c.src, fuel)
+					compareRuns(t, fmt.Sprintf("fuel=%v: ", fuel), want, werr, got, stderr, gerr, false)
 				}
 			})
 		}
 	}
 }
 
-// checkConformance compares the compiled program with the interpreter's
-// result.
-func checkConformance(t *testing.T, rt wazero.Runtime, c chunk, want string, werr error, fuel bool) {
+// compareRuns fails t if the output or the failure of a compiled program
+// differs from that of the reference interpreter; label prefixes the
+// messages. With overflowOK, a compiled program that stops because an int
+// does not fit in 64 bits matches if its output so far is a prefix of the
+// interpreter's, which went on with a big integer.
+func compareRuns(t *testing.T, label, want string, werr error, got, stderr string, gerr error, overflowOK bool) {
 	t.Helper()
-	got, stderr, gerr := execute(t, rt, c.name, c.src, fuel)
-	if werr != nil {
-		if gerr == nil {
-			t.Fatalf("fuel=%v: interpreter failed with %v, compiled program succeeded with output:\n%s", fuel, werr, got)
-		}
+	if gerr != nil {
 		// Only a Starlark error matches: a trap, stack overflow or
 		// deadline is a bug even where the interpreter fails.
 		var exit *sys.ExitError
 		if !errors.As(gerr, &exit) || exit.ExitCode() != 1 || !strings.HasPrefix(stderr, "Error: ") {
-			t.Fatalf("fuel=%v: interpreter failed with %v, compiled program did not fail with a Starlark error: %v\nstderr: %s",
-				fuel, werr, gerr, stderr)
+			t.Fatalf("%scompiled program did not fail with a Starlark error: %v (interpreter: %v)\nstderr: %s\noutput so far:\n%s",
+				label, gerr, werr, stderr, got)
 		}
-	} else if gerr != nil {
-		t.Fatalf("fuel=%v: compiled program failed: %v\nstderr: %s\noutput so far:\n%s", fuel, gerr, stderr, got)
+		if overflowOK && (strings.Contains(stderr, "int overflow") ||
+			strings.Contains(stderr, "cannot convert float to integer: out of range")) {
+			if !strings.HasPrefix(want, got) {
+				t.Fatalf("%soutput before int overflow differs\n--- interpreter ---\n%s--- compiled ---\n%s", label, want, got)
+			}
+			return
+		}
+	}
+	switch {
+	case werr != nil && gerr == nil:
+		t.Fatalf("%sinterpreter failed with %v, compiled program succeeded with output:\n%s", label, werr, got)
+	case werr == nil && gerr != nil:
+		t.Fatalf("%scompiled program failed: %v\nstderr: %s\noutput so far:\n%s", label, gerr, stderr, got)
 	}
 	if got != want {
-		t.Errorf("fuel=%v: output mismatch\n--- interpreter ---\n%s--- compiled ---\n%s", fuel, want, got)
+		t.Errorf("%soutput mismatch at %s\n--- interpreter ---\n%s--- compiled ---\n%s", label, firstDiff(want, got), want, got)
 	}
+}
+
+// firstDiff describes the first line in which want and got differ.
+func firstDiff(want, got string) string {
+	wl, gl := strings.Split(want, "\n"), strings.Split(got, "\n")
+	for i := range wl {
+		if i >= len(gl) || wl[i] != gl[i] {
+			g := "<missing>"
+			if i < len(gl) {
+				g = gl[i]
+			}
+			return fmt.Sprintf("line %d:\n  interpreter: %s\n  compiled:    %s", i+1, wl[i], g)
+		}
+	}
+	return fmt.Sprintf("line %d: compiled output has extra lines", len(wl)+1)
 }
