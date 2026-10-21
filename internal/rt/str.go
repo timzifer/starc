@@ -23,7 +23,7 @@ func (r *RT) registerStr() {
 		s := f.Local(I32)
 		f.Add(
 			Set(s, r.Call("str_new", get(f.Param(1)))),
-			MemoryCopy(sbytes(get(s)), get(f.Param(0)), get(f.Param(1))),
+			r.memcopy(sbytes(get(s)), get(f.Param(0)), get(f.Param(1))),
 			get(s),
 		)
 	})
@@ -34,8 +34,8 @@ func (r *RT) registerStr() {
 			If(eqz(slen(get(a))), Return(get(b))),
 			If(eqz(slen(get(b))), Return(get(a))),
 			Set(s, r.Call("str_new", add(slen(get(a)), slen(get(b))))),
-			MemoryCopy(sbytes(get(s)), sbytes(get(a)), slen(get(a))),
-			MemoryCopy(add(sbytes(get(s)), slen(get(a))), sbytes(get(b)), slen(get(b))),
+			r.memcopy(sbytes(get(s)), sbytes(get(a)), slen(get(a))),
+			r.memcopy(add(sbytes(get(s)), slen(get(a))), sbytes(get(b)), slen(get(b))),
 			get(s),
 		)
 	})
@@ -44,7 +44,7 @@ func (r *RT) registerStr() {
 		p, q, n := f.Param(0), f.Param(1), f.Param(2)
 		i, x, y := f.Local(I32), f.Local(I32), f.Local(I32)
 		f.Add(
-			forRange(i, c32(0), get(n),
+			r.forRange(i, c32(0), get(n),
 				Set(x, I32Load8U(add(get(p), get(i)), 0)),
 				Set(y, I32Load8U(add(get(q), get(i)), 0)),
 				If(I32LtU(get(x), get(y)), Return(c32(-1))),
@@ -71,15 +71,25 @@ func (r *RT) registerStr() {
 			IfV(I32, lt(get(la), get(lb)), c32(-1), IfV(I32, gt(get(la), get(lb)), c32(1), c32(0))),
 		)
 	})
+	// str_hash(s) -> hash, cached in the string. Fuel is charged as if the
+	// hash were computed every time, so that it does not depend on which
+	// earlier call computed it first.
 	r.define("str_hash", p1, r1, func(f *Func) {
 		s := f.Param(0)
 		h, i := f.Local(I32), f.Local(I32)
+		brk, cont := NewLabel(), NewLabel()
 		f.Add(
+			r.Charge(I64Mul(I64ExtendI32U(slen(get(s))), I64c(FuelLoop))),
 			Set(h, ld(get(s), offStrHash)),
 			If(get(h), Return(get(h))),
 			Set(h, U32c(2166136261)),
-			forRange(i, c32(0), slen(get(s)),
-				Set(h, mul(I32Xor(get(h), I32Load8U(add(sbytes(get(s)), get(i)), 0)), c32(16777619)))),
+			Set(i, c32(0)),
+			Block(brk, Loop(cont,
+				BrIf(brk, ge(get(i), slen(get(s)))),
+				Set(h, mul(I32Xor(get(h), I32Load8U(add(sbytes(get(s)), get(i)), 0)), c32(16777619))),
+				Set(i, add(get(i), c32(1))),
+				Br(cont),
+			)),
 			If(eqz(get(h)), Set(h, c32(1))),
 			st(get(s), offStrHash, get(h)),
 			get(h),
@@ -100,7 +110,7 @@ func (r *RT) registerStr() {
 		i, n := f.Local(I32), f.Local(I32)
 		f.Add(
 			Set(n, slen(get(x))),
-			forRange(i, get(a), add(sub(get(b), get(n)), c32(1)),
+			r.forRange(i, get(a), add(sub(get(b), get(n)), c32(1)),
 				If(eqz(r.Call("mem_cmp", add(sbytes(get(s)), get(i)), sbytes(get(x)), get(n))), Return(get(i)))),
 			c32(-1),
 		)
@@ -113,7 +123,7 @@ func (r *RT) registerStr() {
 		f.Add(
 			Set(n, slen(get(x))),
 			Set(i, sub(get(b), get(n))),
-			Block(brk, Loop(cont,
+			Block(brk, r.loop(cont,
 				BrIf(brk, lt(get(i), get(a))),
 				If(eqz(r.Call("mem_cmp", add(sbytes(get(s)), get(i)), sbytes(get(x)), get(n))), Return(get(i))),
 				Set(i, sub(get(i), c32(1))),
@@ -131,7 +141,7 @@ func (r *RT) registerStr() {
 			Set(n, ld(get(seq), 4)),
 			Set(base, r.Call("seq_base", get(seq))),
 			If(eqz(get(n)), Return(r.S(""))),
-			forRange(i, c32(0), get(n),
+			r.forRange(i, c32(0), get(n),
 				Set(e, ld(elem(get(base), 0, get(i)), 0)),
 				If(not(isTag(get(e), TString)),
 					r.Fail("join: in list, want string, got ", r.TypeName(get(e)))),
@@ -140,13 +150,13 @@ func (r *RT) registerStr() {
 			Set(total, add(get(total), mul(slen(get(sep)), sub(get(n), c32(1))))),
 			Set(s, r.Call("str_new", get(total))),
 			Set(p, sbytes(get(s))),
-			forRange(i, c32(0), get(n),
+			r.forRange(i, c32(0), get(n),
 				If(get(i), Seq{
-					MemoryCopy(get(p), sbytes(get(sep)), slen(get(sep))),
+					r.memcopy(get(p), sbytes(get(sep)), slen(get(sep))),
 					Set(p, add(get(p), slen(get(sep)))),
 				}),
 				Set(e, ld(elem(get(base), 0, get(i)), 0)),
-				MemoryCopy(get(p), sbytes(get(e)), slen(get(e))),
+				r.memcopy(get(p), sbytes(get(e)), slen(get(e))),
 				Set(p, add(get(p), slen(get(e)))),
 			),
 			get(s),
@@ -163,7 +173,7 @@ func (r *RT) registerStr() {
 			Set(p, add(get(buf), c32(24))),
 			Set(neg, I64LtS(Get(x), I64c(0))),
 			Set(u, IfV(I64, get(neg), I64Sub(I64c(0), Get(x)), Get(x))),
-			Block(brk, Loop(cont,
+			Block(brk, r.loop(cont,
 				Set(p, sub(get(p), c32(1))),
 				I32Store8(get(p), 0, add(I32WrapI64(I64RemU(get(u), I64c(10))), c32('0'))),
 				Set(u, I64DivU(get(u), I64c(10))),
@@ -188,7 +198,7 @@ func (r *RT) registerStr() {
 			Set(buf, r.Call("alloc", add(mul(slen(get(s)), c32(4)), c32(2)))),
 			Set(p, get(buf)),
 			I32Store8(get(p), 0, c32('"')), Set(p, add(get(p), c32(1))),
-			forRange(i, c32(0), slen(get(s)),
+			r.forRange(i, c32(0), slen(get(s)),
 				Set(c, I32Load8U(add(sbytes(get(s)), get(i)), 0)),
 				IfElse(eq(get(c), c32('"')), []Expr{esc('"')}, []Expr{
 					IfElse(eq(get(c), c32('\\')), []Expr{esc('\\')}, []Expr{
@@ -246,7 +256,7 @@ func (r *RT) registerStr() {
 				push(IfV(I32, eq(get(t), c32(TList)), r.S("["), r.S("("))),
 				Set(n, ld(get(v), 4)),
 				Set(base, r.Call("seq_base", get(v))),
-				forRange(i, c32(0), get(n),
+				r.forRange(i, c32(0), get(n),
 					If(get(i), push(r.S(", "))),
 					push(r.Call("repr", ld(elem(get(base), 0, get(i)), 0))),
 				),
@@ -258,7 +268,7 @@ func (r *RT) registerStr() {
 			If(eq(get(t), c32(TDict)), Seq{
 				I32Store8(get(v), offFlags, or(I32Load8U(get(v), offFlags), c32(flagRepr))),
 				push(r.S("{")),
-				forRange(i, c32(0), ld(get(v), offDictUsed),
+				r.forRange(i, c32(0), ld(get(v), offDictUsed),
 					Set(ent, add(ld(get(v), offDictEntries), mul(get(i), c32(12)))),
 					If(ld(get(ent), 4), Seq{
 						If(get(n), push(r.S(", "))),
@@ -310,7 +320,7 @@ func (r *RT) registerStr() {
 			o, i, ch := f.Local(I32), f.Local(I32), f.Local(I32)
 			f.Add(
 				Set(o, r.Call("str_from", sbytes(get(s)), slen(get(s)))),
-				forRange(i, c32(0), slen(get(s)),
+				r.forRange(i, c32(0), slen(get(s)),
 					Set(ch, I32Load8U(add(sbytes(get(o)), get(i)), 0)),
 					If(and(ge(get(ch), c32(c.lo)), le(get(ch), c32(c.hi))),
 						I32Store8(add(sbytes(get(o)), get(i)), 0, add(get(ch), c32(c.delta)))),
@@ -349,14 +359,14 @@ func (r *RT) registerStr() {
 				// Without a prefix, a literal starting with zero must be all
 				// zeros, so int("0755", 0) is rejected.
 				If(and(lt(add(get(i), c32(1)), get(n)), eq(I32Load8U(add(sbytes(get(s)), get(i)), 0), c32('0'))), Seq{
-					forRange(i, add(get(i), c32(1)), get(n),
+					r.forRange(i, add(get(i), c32(1)), get(n),
 						If(ne(I32Load8U(add(sbytes(get(s)), get(i)), 0), c32('0')), Return(c32(0)))),
 					Return(r.Call("int", I64c(0))),
 				}),
 				Set(base, c32(10)),
 			}),
 			If(ge(get(i), get(n)), Return(c32(0))),
-			forRange(i, get(i), get(n),
+			r.forRange(i, get(i), get(n),
 				Set(c, I32Load8U(add(sbytes(get(s)), get(i)), 0)),
 				Set(d, IfV(I32, and(ge(get(c), c32('0')), le(get(c), c32('9'))), sub(get(c), c32('0')),
 					IfV(I32, and(ge(I32Or(get(c), c32(0x20)), c32('a')), le(I32Or(get(c), c32(0x20)), c32('z'))),
@@ -405,28 +415,28 @@ func (r *RT) defineFloatToStr() {
 				put(digit(c32(0))),
 				If(gt(get(nd), c32(1)), Seq{
 					put(c32('.')),
-					forRange(i, c32(1), get(nd), put(digit(get(i)))),
+					r.forRange(i, c32(1), get(nd), put(digit(get(i)))),
 				}),
 				put(c32('e')),
 				IfElse(lt(get(exp), c32(0)), []Expr{put(c32('-')), Set(exp, sub(c32(0), get(exp)))}, []Expr{put(c32('+'))}),
 				If(lt(get(exp), c32(10)), put(c32('0'))),
 				Set(digits, r.Call("i64_to_str", I64ExtendI32S(get(exp)))),
-				MemoryCopy(get(q), sbytes(get(digits)), slen(get(digits))),
+				r.memcopy(get(q), sbytes(get(digits)), slen(get(digits))),
 				Set(q, add(get(q), slen(get(digits)))),
 			}, []Expr{
 				IfElse(le(get(dp), c32(0)), []Expr{
 					put(c32('0')), put(c32('.')),
-					forRange(i, get(dp), c32(0), put(c32('0'))),
-					forRange(i, c32(0), get(nd), put(digit(get(i)))),
+					r.forRange(i, get(dp), c32(0), put(c32('0'))),
+					r.forRange(i, c32(0), get(nd), put(digit(get(i)))),
 				}, []Expr{
 					IfElse(ge(get(dp), get(nd)), []Expr{
-						forRange(i, c32(0), get(nd), put(digit(get(i)))),
-						forRange(i, get(nd), get(dp), put(c32('0'))),
+						r.forRange(i, c32(0), get(nd), put(digit(get(i)))),
+						r.forRange(i, get(nd), get(dp), put(c32('0'))),
 						put(c32('.')), put(c32('0')),
 					}, []Expr{
-						forRange(i, c32(0), get(dp), put(digit(get(i)))),
+						r.forRange(i, c32(0), get(dp), put(digit(get(i)))),
 						put(c32('.')),
-						forRange(i, get(dp), get(nd), put(digit(get(i)))),
+						r.forRange(i, get(dp), get(nd), put(digit(get(i)))),
 					}),
 				}),
 			}),

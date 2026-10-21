@@ -94,7 +94,7 @@ func (c *compiler) hostValue(n *hostNode) uint32 {
 		return n.addr
 	}
 	if n.fn {
-		n.addr = c.r.HostBuiltin(n.name)
+		n.addr = c.r.HostBuiltin(n.name, c.opts.HostCost[n.name])
 		return n.addr
 	}
 	members := make([]rt.Member, 0, len(n.children))

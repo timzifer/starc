@@ -51,8 +51,9 @@ starc run examples/wordcount.star count_words "a b a" 1
 ```
 
 Flags: `-o`, `-command`, `-export a,b`, `-no-names`, `-host ctx.entity,now`,
-`-no-wasi`, and the dialect flags `-while`, `-toplevel-control`,
-`-global-reassign`, `-recursion`. Run `starc help` for details.
+`-no-wasi`, `-fuel`, `-budget N` (run), and the dialect flags `-while`,
+`-toplevel-control`, `-global-reassign`, `-recursion`. Run `starc help`
+for details.
 
 ## Go package
 
@@ -106,6 +107,23 @@ m, err := host.Load(ctx, wasm, &host.Config{Funcs: map[string]host.Func{
 
 The program calls `ctx.entity(7)`; an error returned by a host function
 becomes a Starlark error.
+
+### Fuel
+
+With `Options.Fuel`, the module meters its own execution against a
+budget, deterministically on every platform. Loops, recursion and
+library calls all cost fuel, so untrusted programs always terminate:
+
+```go
+wasm, err := starc.Compile("bot.star", src, &starc.Options{Fuel: true})
+m, err := host.Load(ctx, wasm, &host.Config{InitFuel: 100_000})
+m.SetFuel(ctx, 50_000)
+_, err = m.Call(ctx, "think")
+errors.Is(err, host.ErrFuelExhausted)  // budget used up
+left, _ := m.Fuel(ctx)
+```
+
+See [docs/fuel.md](docs/fuel.md) for the cost table.
 
 ## Module interface
 

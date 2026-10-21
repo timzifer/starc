@@ -8,6 +8,18 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+* Fuel metering: `Options.Fuel` (`-fuel`) compiles a deterministic
+  execution budget into the module. Statements, calls, loop iterations,
+  runtime loops and memory traffic cost fuel per a versioned cost table
+  (in `starc.meta`, see docs/fuel.md); top-level code is metered too.
+  Exports `starc_fuel_set` and `starc_fuel`; an exhausted budget fails
+  with `fuel exhausted`. `HostFunc.Cost` declares a cost per host call,
+  and `host.ChargeFuel` charges during one. Package `host` adds
+  `Config.InitFuel`, `Module.SetFuel`, `Module.Fuel` and
+  `ErrFuelExhausted`; `starc run -fuel` reports the fuel used and
+  `-budget N` limits it.
+* `starc_error_code` export and `host.Error.Code` distinguish the cause
+  of an error (Starlark error or fuel exhausted).
 * Host functions: `Options.Host` (`-host`) declares functions that the
   embedder provides. They are imported from `starc_host` and called with
   the `abi` encoding; their errors become Starlark errors. Dotted names

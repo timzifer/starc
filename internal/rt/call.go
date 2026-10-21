@@ -38,7 +38,7 @@ func (r *RT) registerCall() {
 		f.Add(
 			Set(o, r.Call("tuple_new", add(ld(get(t), offTupLen), c32(1)))),
 			st(get(o), offTupElems, get(x)),
-			MemoryCopy(add(get(o), c32(offTupElems+4)), add(get(t), c32(offTupElems)), I32Shl(ld(get(t), offTupLen), c32(2))),
+			r.memcopy(add(get(o), c32(offTupElems+4)), add(get(t), c32(offTupElems)), I32Shl(ld(get(t), offTupLen), c32(2))),
 			get(o),
 		)
 	})
@@ -87,24 +87,24 @@ func (r *RT) registerCall() {
 				If(eqz(and(get(flags), c32(SpecVarargs))),
 					r.Fail("function ", name(), " accepts at most ", r.Call("i64_to_str", I64ExtendI32S(get(npos))),
 						" positional arguments (", r.Call("i64_to_str", I64ExtendI32S(get(nargs))), " given)")),
-				MemoryCopy(get(slots), add(get(args), c32(offTupElems)), I32Shl(get(npos), c32(2))),
+				r.memcopy(get(slots), add(get(args), c32(offTupElems)), I32Shl(get(npos), c32(2))),
 				Set(e, r.Call("tuple_new", sub(get(nargs), get(npos)))),
-				MemoryCopy(add(get(e), c32(offTupElems)), elem(get(args), offTupElems, get(npos)), I32Shl(sub(get(nargs), get(npos)), c32(2))),
+				r.memcopy(add(get(e), c32(offTupElems)), elem(get(args), offTupElems, get(npos)), I32Shl(sub(get(nargs), get(npos)), c32(2))),
 				st(slot(get(named)), 0, get(e)),
 			}, []Expr{
-				MemoryCopy(get(slots), add(get(args), c32(offTupElems)), I32Shl(get(nargs), c32(2))),
+				r.memcopy(get(slots), add(get(args), c32(offTupElems)), I32Shl(get(nargs), c32(2))),
 				If(and(get(flags), c32(SpecVarargs)), st(slot(get(named)), 0, r.Call("tuple_new", c32(0)))),
 			}),
 			If(and(get(flags), c32(SpecKwargs)), Seq{
 				Set(kwd, r.Call("dict_new")),
 				st(slot(sub(get(nslots), c32(1))), 0, get(kwd)),
 			}),
-			If(get(kw), forRange(i, c32(0), ld(get(kw), offDictUsed),
+			If(get(kw), r.forRange(i, c32(0), ld(get(kw), offDictUsed),
 				Set(e, add(ld(get(kw), offDictEntries), mul(get(i), c32(12)))),
 				Set(k, ld(get(e), 4)),
 				If(get(k), Seq{
 					Set(found, c32(-1)),
-					forRangeL(j, c32(0), get(named), brk,
+					r.forRangeL(j, c32(0), get(named), brk,
 						If(r.Call("str_eq", ld(elem(get(names), 0, get(j)), 0), get(k)), Seq{Set(found, get(j)), Br(brk)})),
 					IfElse(ge(get(found), c32(0)), []Expr{
 						If(ld(slot(get(found)), 0),
@@ -118,7 +118,7 @@ func (r *RT) registerCall() {
 				}),
 			)),
 			Set(defs, ld(get(fn), offFnDefaults)),
-			forRange(i, c32(0), get(named),
+			r.forRange(i, c32(0), get(named),
 				If(eqz(ld(slot(get(i)), 0)), Seq{
 					Set(e, IfV(I32, get(defs), ld(elem(get(defs), offTupElems, get(i)), 0), c32(0))),
 					If(eqz(get(e)),
@@ -197,7 +197,7 @@ func (r *RT) registerCallExtras() {
 		i, e := f.Local(I32), f.Local(I32)
 		f.Add(
 			If(not(isTag(get(x), TDict)), r.Fail("argument after ** must be a mapping, not ", r.TypeName(get(x)))),
-			forRange(i, c32(0), ld(get(x), offDictUsed),
+			r.forRange(i, c32(0), ld(get(x), offDictUsed),
 				Set(e, add(ld(get(x), offDictEntries), mul(get(i), c32(12)))),
 				If(ld(get(e), 4), Seq{
 					If(not(isTag(ld(get(e), 4), TString)), r.Fail("keywords must be strings, not ", r.TypeName(ld(get(e), 4)))),

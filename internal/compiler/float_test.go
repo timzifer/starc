@@ -56,7 +56,7 @@ func TestFloatConversion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, stderr, err := execute(t, newTestRuntime(t), "floats", src.String())
+	got, stderr, err := execute(t, newTestRuntime(t), "floats", src.String(), false)
 	if err != nil {
 		t.Fatalf("%v: %s", err, stderr)
 	}
@@ -101,7 +101,7 @@ func TestFloatParseLong(t *testing.T) {
 		src.WriteString("print(float(\"" + in + "\"))\n")
 		want = append(want, out)
 	}
-	got, stderr, err := execute(t, newTestRuntime(t), "long", src.String())
+	got, stderr, err := execute(t, newTestRuntime(t), "long", src.String(), false)
 	if err != nil {
 		t.Fatalf("%v: %s", err, stderr)
 	}

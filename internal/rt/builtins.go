@@ -111,7 +111,7 @@ func (r *RT) registerBuiltins() {
 				If(not(isTag(get(sep), TString)), r.Fail("print: sep must be a string")),
 			}),
 			Set(parts, r.Call("list_new", nargs(args))),
-			forRange(i, c32(0), nargs(args),
+			r.forRange(i, c32(0), nargs(args),
 				r.Call("list_append_raw", get(parts), r.Call("str", ld(elem(get(args), offTupElems, get(i)), 0)))),
 			Set(s, r.Call("str_concat", r.Call("str_join", get(sep), get(parts)), r.S("\n"))),
 			Drop(r.Call("write", c32(1), get(s))),
@@ -127,7 +127,7 @@ func (r *RT) registerBuiltins() {
 				If(eqz(get(sep)), Set(sep, r.S(" "))),
 			}),
 			Set(parts, r.Call("list_new", nargs(args))),
-			forRange(i, c32(0), nargs(args),
+			r.forRange(i, c32(0), nargs(args),
 				r.Call("list_append_raw", get(parts), r.Call("str", ld(elem(get(args), offTupElems, get(i)), 0)))),
 			r.Call("fail", r.Call("str_concat", r.S("fail: "), r.Call("str_join", get(sep), get(parts)))),
 			Unreachable(),
@@ -164,7 +164,7 @@ func (r *RT) registerBuiltins() {
 				" arguments, want at most 2")),
 			If(gt(nargs(args), c32(0)), Set(x, arg(args, 0))),
 			If(eq(nargs(args), c32(2)), Set(res, arg(args, 1))),
-			If(get(kw), forRange(i, c32(0), ld(get(kw), offDictUsed),
+			If(get(kw), r.forRange(i, c32(0), ld(get(kw), offDictUsed),
 				Set(e, add(ld(get(kw), offDictEntries), mul(get(i), c32(12)))),
 				Set(k, ld(get(e), 4)),
 				If(get(k), Seq{
@@ -240,7 +240,7 @@ func (r *RT) registerBuiltins() {
 				IfElse(isTag(get(x), TDict), []Expr{r.Call("dict_merge", get(d), get(x))}, []Expr{
 					Set(s, r.Call("iter_seq", get(x))),
 					Set(n, ld(get(s), 4)),
-					forRange(i, c32(0), get(n),
+					r.forRange(i, c32(0), get(n),
 						Set(p, r.Call("unpack", ld(elem(r.Call("seq_base", get(s)), 0, get(i)), 0), c32(2))),
 						r.Call("dict_set", get(d), ld(r.Call("seq_base", get(p)), 0), ld(r.Call("seq_base", get(p)), 4)),
 					),
@@ -273,7 +273,7 @@ func (r *RT) registerBuiltins() {
 			r.checkArgs("hash", args, kw, 1, 1),
 			Set(s, arg(args, 0)),
 			If(not(isTag(get(s), TString)), r.Fail("hash: got ", r.TypeName(get(s)), ", want string")),
-			forRange(i, c32(0), slen(get(s)),
+			r.forRange(i, c32(0), slen(get(s)),
 				Set(h, add(mul(get(h), c32(31)), I32Load8U(add(sbytes(get(s)), get(i)), 0)))),
 			r.Call("int", I64ExtendI32S(get(h))),
 		)
@@ -315,7 +315,7 @@ func (r *RT) registerBuiltins() {
 			r.checkArgs("dir", args, kw, 1, 1),
 			Set(l, r.Call("list_new", c32(0))),
 			Raw(func() Expr {
-				return forRange(i, c32(0), c32(len(r.methodNames)),
+				return r.forRange(i, c32(0), c32(len(r.methodNames)),
 					If(r.Call("method_lookup", arg(args, 0), get(i)),
 						r.Call("list_append_raw", get(l), r.Call("method_name", get(i)))))
 			}),
@@ -375,7 +375,7 @@ func (r *RT) registerBuiltins() {
 				IfV(I32, eq(and(get(b0), c32(0xf0)), c32(0xe0)), c32(3), c32(4)))),
 			If(ne(get(i), get(n)), r.Fail("ord: string encodes more than one Unicode code point")),
 			Set(cp, and(get(b0), I32ShrU(c32(0x7f), get(i)))),
-			forRange(b0, c32(1), get(n), Set(cp, or(I32Shl(get(cp), c32(6)), and(byteAt(get(b0)), c32(0x3f))))),
+			r.forRange(b0, c32(1), get(n), Set(cp, or(I32Shl(get(cp), c32(6)), and(byteAt(get(b0)), c32(0x3f))))),
 			r.Call("int", I64ExtendI32U(get(cp))),
 		)
 	})
@@ -415,7 +415,7 @@ func (r *RT) registerBuiltins() {
 			If(I64GtS(get(x), I64ExtendI32S(get(n))), Set(x, I64ExtendI32S(get(n)))),
 			Set(i, I32WrapI64(get(x))),
 			r.Call("list_append_raw", get(l), r.NoneV()),
-			MemoryCopy(elem(ld(get(l), offListData), 0, add(get(i), c32(1))), elem(ld(get(l), offListData), 0, get(i)),
+			r.memcopy(elem(ld(get(l), offListData), 0, add(get(i), c32(1))), elem(ld(get(l), offListData), 0, get(i)),
 				I32Shl(sub(get(n), get(i)), c32(2))),
 			st(elem(ld(get(l), offListData), 0, get(i)), 0, arg(args, 2)),
 			r.NoneV(),
@@ -432,7 +432,7 @@ func (r *RT) registerBuiltins() {
 			If(eq(nargs(args), c32(2)), Set(i, r.Call("norm_index", r.Call("as_int", arg(args, 1), r.S("pop: index")), get(n)))),
 			If(eqz(get(n)), r.Fail("pop: list is empty")),
 			Set(v, ld(elem(ld(get(l), offListData), 0, get(i)), 0)),
-			MemoryCopy(elem(ld(get(l), offListData), 0, get(i)), elem(ld(get(l), offListData), 0, add(get(i), c32(1))),
+			r.memcopy(elem(ld(get(l), offListData), 0, get(i)), elem(ld(get(l), offListData), 0, add(get(i), c32(1))),
 				I32Shl(sub(sub(get(n), get(i)), c32(1)), c32(2))),
 			st(get(l), offListLen, sub(get(n), c32(1))),
 			get(v),
@@ -517,7 +517,7 @@ func (r *RT) registerBuiltins() {
 				Return(r.Call("float", IfV(F64, get(neg), F64c(negInf), F64c(posInf))))),
 			If(r.Call("str_eq", get(c), r.S("nan")), Return(r.Call("float", F64Div(F64c(0), F64c(0))))),
 			dsetNd(d, c32(0)), dsetDp(d, c32(0)), dsetTrunc(d, c32(0)),
-			Block(brk, Loop(cont,
+			Block(brk, r.loop(cont,
 				BrIf(brk, ge(get(i), get(n))),
 				Set(c, at()),
 				IfElse(isDigit(get(c)), []Expr{
@@ -553,7 +553,7 @@ func (r *RT) registerBuiltins() {
 				If(ge(get(i), get(n)), Return(c32(0))),
 				If(or(eq(at(), c32('-')), eq(at(), c32('+'))), Seq{Set(eneg, eq(at(), c32('-'))), Set(i, add(get(i), c32(1)))}),
 				If(ge(get(i), get(n)), Return(c32(0))),
-				forRange(i, get(i), get(n),
+				r.forRange(i, get(i), get(n),
 					If(not(isDigit(at())), Return(c32(0))),
 					If(lt(get(ev), c32(10000)), Set(ev, add(mul(get(ev), c32(10)), sub(at(), c32('0'))))),
 				),

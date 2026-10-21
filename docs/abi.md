@@ -48,18 +48,24 @@ rejects such a module if it imports anything from WASI.
 | `_initialize` | `() -> ()` | runs the top-level statements, then freezes all global values; call exactly once |
 | `starc_alloc` | `(n: i32) -> i32` | resets the per-call arena and returns a pointer to `n` bytes for call arguments |
 | `starc_error` | `() -> i64` | location of the last error message (see below), or 0 |
+| `starc_error_code` | `() -> i32` | cause of the last error: 1 Starlark error, 2 fuel exhausted, 0 none |
+| `starc_fuel_set` | `(n: i64) -> ()` | sets the remaining fuel budget (only with fuel metering, see [fuel.md](fuel.md)) |
+| `starc_fuel` | `() -> i64` | returns the remaining fuel budget (only with fuel metering) |
 | *function* | `(ptr: i32, len: i32) -> i64` | one export per exported top-level `def` |
 
 By default every top-level `def` whose name does not start with `_` is
 exported under its own name; `Options.Exports` / `-export` selects a
-subset. The names `memory`, `_initialize`, `_start`, `starc_alloc` and
-`starc_error` are reserved.
+subset. The names `memory`, `_initialize`, `_start`, `starc_alloc`,
+`starc_error`, `starc_error_code`, `starc_fuel_set` and `starc_fuel`
+are reserved.
 
 ### Command
 
 With `ExecModel: Command` (`-command`) the module exports `memory` and
-`_start`. `_start` runs the program. On error, `Error: <message>` is
-written to stderr and the module calls `proc_exit(1)`.
+`_start`, plus the two fuel functions with fuel metering. `_start` runs
+the program. On error, `Error: <message>` is written to stderr and the
+module calls `proc_exit` with the error code as status: 1 for a Starlark
+error, 2 for exhausted fuel.
 
 ## Calling a function
 
@@ -156,13 +162,17 @@ The custom section `starc.meta` contains UTF-8 JSON:
   "model": "reactor",
   "exports": [{"name": "greet", "params": ["name", "punct"]}],
   "host": ["ctx.entity", "ctx.now"],
-  "no_wasi": true
+  "no_wasi": true,
+  "fuel": {"version": 1, "statement": 1, "call": 1, "iteration": 1,
+           "runtime_iteration": 1, "bytes_per_unit": 16}
 }
 ```
 
 Parameter names of `*args` and `**kwargs` parameters are prefixed with
 `*` and `**`. `host` lists the imported host functions and is omitted if
 there are none; `no_wasi` is omitted for modules that may import WASI.
+`fuel` is the cost table of a module built with fuel metering
+([fuel.md](fuel.md)) and is omitted otherwise.
 
 ## Example: JavaScript host
 

@@ -37,6 +37,39 @@ func checkImports(cm wazero.CompiledModule, meta *Meta, funcs map[string]Func) e
 	return nil
 }
 
+type callerKey struct{}
+
+// ChargeFuel charges n units of fuel to the module that called the host
+// function whose context is ctx, for example for work proportional to
+// the size of a query. The module fails with "fuel exhausted" when the
+// call returns if its budget is used up. ChargeFuel does nothing for
+// modules built without fuel metering, for n <= 0, or outside a host
+// function call. It must be called before the host function returns, on
+// the goroutine that runs it.
+func ChargeFuel(ctx context.Context, n int64) {
+	mod, _ := ctx.Value(callerKey{}).(api.Module)
+	if mod == nil || n <= 0 {
+		return
+	}
+	get, set := mod.ExportedFunction("starc_fuel"), mod.ExportedFunction("starc_fuel_set")
+	if get == nil || set == nil {
+		return
+	}
+	res, err := get.Call(ctx)
+	if err != nil {
+		panic(err)
+	}
+	rest := int64(res[0])
+	if rest < math.MinInt64+n {
+		rest = math.MinInt64 // repeated charges within one call
+	} else {
+		rest -= n
+	}
+	if _, err := set.Call(ctx, api.EncodeI64(rest)); err != nil {
+		panic(err)
+	}
+}
+
 // hostState holds the result of the last host call until the guest
 // fetches it with starc_result.
 type hostState struct {
@@ -114,7 +147,7 @@ func (st *hostState) call(name string, fn Func) api.GoModuleFunc {
 		if err != nil {
 			protocolError("%s: %v", name, err)
 		}
-		res, err := fn(ctx, args, kwargs)
+		res, err := fn(context.WithValue(ctx, callerKey{}, mod), args, kwargs)
 		var out []byte
 		if err == nil {
 			if out, err = abi.Encode(res); err != nil {

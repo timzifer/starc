@@ -38,6 +38,11 @@ type Options struct {
 	Host []string
 	// NoWASI removes all WASI imports; print goes to the host.
 	NoWASI bool
+	// HostCost is the fuel charged per call of a host function, in
+	// addition to the cost of a call.
+	HostCost map[string]int64
+	// Fuel enables fuel metering.
+	Fuel bool
 }
 
 // Error is a compilation error at a source position.
@@ -60,9 +65,12 @@ func (l ErrorList) Error() string {
 
 // Reserved export names.
 const (
-	ExportAlloc = "starc_alloc"
-	ExportError = "starc_error"
-	MetaSection = "starc.meta"
+	ExportAlloc     = "starc_alloc"
+	ExportError     = "starc_error"
+	ExportErrorCode = "starc_error_code"
+	ExportFuelSet   = "starc_fuel_set"
+	ExportFuel      = "starc_fuel"
+	MetaSection     = "starc.meta"
 )
 
 // unit is one compiled source file (the prelude or the user program).
@@ -117,7 +125,7 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		return nil, fmt.Errorf("internal error: prelude: %w", err)
 	}
 	m := &Module{ExportMemory: "memory", Names: opts.Names}
-	r := rt.New(m, rt.Config{Command: opts.Command, NoWASI: opts.NoWASI})
+	r := rt.New(m, rt.Config{Command: opts.Command, NoWASI: opts.NoWASI, Fuel: opts.Fuel})
 	c.m, c.r = m, r
 
 	preludeUniverse := func(name string) bool {
@@ -229,10 +237,22 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		errF := m.AddFunc(NewFunc("starc_error", nil, I64))
 		errF.Add(r.Call("abi_error"))
 		m.Export(ExportError, errF)
+		codeF := m.AddFunc(NewFunc(ExportErrorCode, nil, I32))
+		codeF.Add(r.Call("error_code"))
+		m.Export(ExportErrorCode, codeF)
 		for _, name := range exports {
 			m.Export(name, c.exportWrapper(name))
 			meta = append(meta, c.exportMeta(name))
 		}
+	}
+
+	if opts.Fuel {
+		setF := m.AddFunc(NewFunc(ExportFuelSet, []ValType{I64}))
+		setF.Add(r.Call("fuel_set", Get(setF.Param(0))))
+		m.Export(ExportFuelSet, setF)
+		getF := m.AddFunc(NewFunc(ExportFuel, nil, I64))
+		getF.Add(r.Call("fuel_get"))
+		m.Export(ExportFuel, getF)
 	}
 
 	r.LayoutMethods()
@@ -243,15 +263,35 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 	hostFuncs := append([]string{}, r.HostFuncs()...)
 	sort.Strings(hostFuncs)
 	payload, _ := json.Marshal(struct {
-		Version int          `json:"version"`
-		Model   string       `json:"model"`
-		Exports []exportMeta `json:"exports"`
-		Host    []string     `json:"host,omitempty"`
-		NoWASI  bool         `json:"no_wasi,omitempty"`
-	}{1, map[bool]string{true: "command", false: "reactor"}[opts.Command], meta, hostFuncs, opts.NoWASI})
+		Version int           `json:"version"`
+		Model   string        `json:"model"`
+		Exports []exportMeta  `json:"exports"`
+		Host    []string      `json:"host,omitempty"`
+		NoWASI  bool          `json:"no_wasi,omitempty"`
+		Fuel    *rt.FuelTable `json:"fuel,omitempty"`
+	}{1, map[bool]string{true: "command", false: "reactor"}[opts.Command], meta, hostFuncs, opts.NoWASI, c.fuelTable()})
 	m.Customs = append(m.Customs, Custom{Name: MetaSection, Payload: payload})
 
 	return m.Encode()
+}
+
+// fuelTable returns the cost table for starc.meta, or nil without
+// metering. It lists the declared costs of the imported host functions.
+func (c *compiler) fuelTable() *rt.FuelTable {
+	if !c.opts.Fuel {
+		return nil
+	}
+	var host map[string]int64
+	for _, name := range c.r.HostFuncs() {
+		if cost := c.opts.HostCost[name]; cost != 0 {
+			if host == nil {
+				host = map[string]int64{}
+			}
+			host[name] = cost
+		}
+	}
+	t := rt.Table(host)
+	return &t
 }
 
 type exportMeta struct {
@@ -318,7 +358,8 @@ func (c *compiler) checkSupported(file *syntax.File) {
 }
 
 func (c *compiler) exportList() ([]string, error) {
-	reserved := map[string]bool{"memory": true, "_initialize": true, "_start": true, ExportAlloc: true, ExportError: true}
+	reserved := map[string]bool{"memory": true, "_initialize": true, "_start": true, ExportAlloc: true, ExportError: true,
+		ExportErrorCode: true, ExportFuelSet: true, ExportFuel: true}
 	if c.opts.Exports == nil {
 		var names []string
 		for _, stmt := range c.user.file.Stmts {
@@ -389,6 +430,7 @@ func (c *compiler) exportWrapper(name string) *Func {
 	}
 	f.Add(
 		GSet(r.ErrObj, I32c(0)),
+		GSet(r.ErrCode, I32c(0)),
 		Set(fn, GGet(c.user.byName[name])),
 		Set(kw, r.Call("alloc", I32c(4))),
 		Set(args, r.Call("abi_args", Get(ptr), Get(n), Get(kw))),

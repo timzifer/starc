@@ -35,6 +35,9 @@ type Config struct {
 	// starc.Options.Host), keyed by their dotted names. Load fails if the
 	// module imports a function that is missing here.
 	Funcs map[string]Func
+	// InitFuel is the fuel budget for running the top-level code of a
+	// module built with fuel metering. 0 means unlimited.
+	InitFuel int64
 }
 
 // Func implements a host function. It receives the positional and
@@ -58,6 +61,19 @@ type Meta struct {
 	Host []string `json:"host,omitempty"`
 	// NoWASI reports a module built without WASI imports.
 	NoWASI bool `json:"no_wasi,omitempty"`
+	// Fuel is the cost table of a module built with fuel metering.
+	Fuel *FuelTable `json:"fuel,omitempty"`
+}
+
+// FuelTable is the cost table of fuel metering (see docs/fuel.md).
+type FuelTable struct {
+	Version          int              `json:"version"`
+	Statement        int              `json:"statement"`
+	Call             int              `json:"call"`
+	Iteration        int              `json:"iteration"`
+	RuntimeIteration int              `json:"runtime_iteration"`
+	BytesPerUnit     int              `json:"bytes_per_unit"`
+	Host             map[string]int64 `json:"host,omitempty"`
 }
 
 // Names of the host import module and of its protocol functions.
@@ -70,17 +86,49 @@ const (
 
 // Error is a Starlark runtime error reported by the module.
 type Error struct {
-	Msg string
+	Msg  string
+	Code ErrorCode
 }
 
 func (e *Error) Error() string { return e.Msg }
 
+// Is reports whether target is ErrFuelExhausted and e has that cause.
+func (e *Error) Is(target error) bool {
+	return target == ErrFuelExhausted && e.Code == CodeFuel
+}
+
+// ErrorCode classifies a Starlark error (see starc_error_code).
+type ErrorCode int
+
+// Error codes.
+const (
+	CodeStarlark ErrorCode = 1 // an ordinary Starlark error
+	CodeFuel     ErrorCode = 2 // the fuel budget was exhausted
+)
+
+// ErrFuelExhausted matches (with errors.Is) the error of a call that
+// ran out of fuel.
+var ErrFuelExhausted = errors.New("fuel exhausted")
+
 // ExitError reports that a command module exited with a non-zero status.
 type ExitError struct {
 	Code uint32
+	// Err is the Starlark error that ended a starc command module: the
+	// exit status of such a module is the error code (1 for a Starlark
+	// error, 2 for exhausted fuel). Its message went to stderr.
+	Err *Error
 }
 
 func (e *ExitError) Error() string { return fmt.Sprintf("module exited with status %d", e.Code) }
+
+// Unwrap returns the Starlark error, so that errors.Is(err,
+// ErrFuelExhausted) holds for a command module that ran out of fuel.
+func (e *ExitError) Unwrap() error {
+	if e.Err == nil {
+		return nil
+	}
+	return e.Err
+}
 
 // Module is an instantiated starc module.
 type Module struct {
@@ -91,6 +139,9 @@ type Module struct {
 	meta    Meta
 	alloc   api.Function
 	errFn   api.Function
+	codeFn  api.Function
+	fuelSet api.Function
+	fuelGet api.Function
 	exports map[string]api.Function
 	busy    bool // a call is in progress
 }
@@ -178,26 +229,42 @@ func Load(ctx context.Context, wasm []byte, cfg *Config) (*Module, error) {
 	if cfg.Stderr != nil {
 		mc = mc.WithStderr(cfg.Stderr)
 	}
-	if meta.Model == "reactor" {
-		mc = mc.WithStartFunctions() // _initialize is called below
-	}
+	// The start function is called below, after the fuel budget is set.
+	mc = mc.WithStartFunctions()
 	mod, err := m.rt.InstantiateModule(ctx, cm, mc)
 	if err != nil {
-		var exit *sys.ExitError
-		if errors.As(err, &exit) {
-			if exit.ExitCode() == 0 {
-				return m, nil
-			}
-			return fail(&ExitError{exit.ExitCode()})
-		}
 		return fail(err)
 	}
 	m.mod = mod
+	m.fuelSet = mod.ExportedFunction("starc_fuel_set")
+	m.fuelGet = mod.ExportedFunction("starc_fuel")
+	if cfg.InitFuel != 0 {
+		if err := m.SetFuel(ctx, cfg.InitFuel); err != nil {
+			_ = mod.Close(ctx)
+			return fail(err)
+		}
+	}
 	if meta.Model != "reactor" {
+		if _, err := mod.ExportedFunction("_start").Call(ctx); err != nil {
+			var exit *sys.ExitError
+			if errors.As(err, &exit) && exit.ExitCode() == 0 {
+				return m, nil
+			}
+			_ = mod.Close(ctx)
+			if errors.As(err, &exit) {
+				e := &ExitError{Code: exit.ExitCode()}
+				if e.Code == uint32(CodeFuel) && meta.Fuel != nil {
+					e.Err = &Error{Msg: "fuel exhausted", Code: CodeFuel}
+				}
+				return fail(e)
+			}
+			return fail(err)
+		}
 		return m, nil
 	}
 	m.alloc = mod.ExportedFunction("starc_alloc")
 	m.errFn = mod.ExportedFunction("starc_error")
+	m.codeFn = mod.ExportedFunction("starc_error_code")
 	for _, ex := range meta.Exports {
 		m.exports[ex.Name] = mod.ExportedFunction(ex.Name)
 	}
@@ -209,20 +276,37 @@ func Load(ctx context.Context, wasm []byte, cfg *Config) (*Module, error) {
 	return m, nil
 }
 
+// SetFuel sets the remaining fuel budget of a module built with fuel
+// metering. Each call consumes fuel from it; set it before each call to
+// give every call its own budget.
+func (m *Module) SetFuel(ctx context.Context, n int64) error {
+	if m.fuelSet == nil {
+		return errors.New("host: module was built without fuel metering")
+	}
+	if n < 0 {
+		return fmt.Errorf("host: negative fuel budget %d", n)
+	}
+	_, err := m.fuelSet.Call(ctx, api.EncodeI64(n))
+	return err
+}
+
+// Fuel returns the remaining fuel budget. It is math.MaxInt64 until a
+// budget is set, and 0 after the budget was exhausted.
+func (m *Module) Fuel(ctx context.Context) (int64, error) {
+	if m.fuelGet == nil {
+		return 0, errors.New("host: module was built without fuel metering")
+	}
+	res, err := m.fuelGet.Call(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return int64(res[0]), nil
+}
+
 // checkExports verifies that the module's execution model is known and
 // that a reactor module exports the ABI functions with the expected
 // signatures, so that malformed modules are rejected before they run.
 func checkExports(cm wazero.CompiledModule, meta *Meta) error {
-	switch meta.Model {
-	case "command":
-		return nil
-	case "reactor":
-	default:
-		return fmt.Errorf("host: unknown execution model %q in starc.meta", meta.Model)
-	}
-	if len(cm.ExportedMemories()) == 0 {
-		return errors.New("host: module does not export its memory")
-	}
 	defs := cm.ExportedFunctions()
 	check := func(name string, params, results []api.ValueType) error {
 		d, ok := defs[name]
@@ -236,6 +320,30 @@ func checkExports(cm wazero.CompiledModule, meta *Meta) error {
 		return nil
 	}
 	i32, i64 := api.ValueTypeI32, api.ValueTypeI64
+	if meta.Fuel != nil {
+		if err := check("starc_fuel_set", []api.ValueType{i64}, nil); err != nil {
+			return err
+		}
+		if err := check("starc_fuel", nil, []api.ValueType{i64}); err != nil {
+			return err
+		}
+	}
+	switch meta.Model {
+	case "command":
+		return check("_start", nil, nil)
+	case "reactor":
+	default:
+		return fmt.Errorf("host: unknown execution model %q in starc.meta", meta.Model)
+	}
+	if len(cm.ExportedMemories()) == 0 {
+		return errors.New("host: module does not export its memory")
+	}
+	// Modules built before starc_error_code existed lack it.
+	if _, ok := defs["starc_error_code"]; ok {
+		if err := check("starc_error_code", nil, []api.ValueType{i32}); err != nil {
+			return err
+		}
+	}
 	if err := check("_initialize", nil, nil); err != nil {
 		return err
 	}
@@ -335,7 +443,13 @@ func (m *Module) starlarkError(ctx context.Context, err error) error {
 	if !ok {
 		return err
 	}
-	return &Error{Msg: string(msg)}
+	code := CodeStarlark
+	if m.codeFn != nil {
+		if res, e2 := m.codeFn.Call(ctx); e2 == nil && res[0] != 0 {
+			code = ErrorCode(api.DecodeI32(res[0]))
+		}
+	}
+	return &Error{Msg: string(msg), Code: code}
 }
 
 // Close releases the module (and its runtime, if private).
