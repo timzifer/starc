@@ -30,7 +30,8 @@ const (
 	TCell     = 10
 	TRange    = 11
 	TBound    = 12
-	NumTags   = 13
+	TModule   = 13
+	NumTags   = 14
 )
 
 // Object layouts (byte offsets).
@@ -77,6 +78,11 @@ const (
 	offBoundRecv = 8
 
 	offCellVal = 4
+
+	offModName    = 4
+	offModLen     = 8
+	offModMembers = 12
+	sizeMod       = 16
 
 	offRangeStart = 8
 	offRangeStop  = 16
@@ -132,6 +138,9 @@ type Config struct {
 	// Command selects the WASI command model: errors are written to
 	// stderr and terminate the process via proc_exit.
 	Command bool
+	// NoWASI removes all WASI imports: print calls the host import
+	// starc_host.starc_print instead of fd_write. It excludes Command.
+	NoWASI bool
 }
 
 // RT is the runtime library for one module.
@@ -146,6 +155,7 @@ type RT struct {
 	HeapMark *Global // arena reset point
 	ErrObj   *Global // string object with the last error message
 	Cursor   *Global // ABI encoder/decoder cursor
+	CurEnd   *Global // end of the buffer being decoded
 	IntCache *Global // table of preallocated small ints, or 0
 	HeapMax  *Global // high-water mark of the heap
 	CmpDepth *Global // nesting depth of the current comparison
@@ -172,8 +182,12 @@ type RT struct {
 	// Hooks supplied by the compiler: Starlark-level helpers from the prelude.
 	Hooks map[string]func() Expr
 
-	fdWrite  *Import
-	procExit *Import
+	fdWrite   *Import
+	procExit  *Import
+	hostPrint *Import
+	hostRes   *Import
+	hostFuncs []string // host functions in creation order
+	modules   bool     // whether any module object exists
 }
 
 // New returns a runtime that adds its functions to m.
@@ -194,6 +208,7 @@ func New(m *Module, cfg Config) *RT {
 	r.HeapMark = m.AddGlobal(&Global{Name: "heap_mark", Type: I32, Mutable: true})
 	r.ErrObj = m.AddGlobal(&Global{Name: "err", Type: I32, Mutable: true})
 	r.Cursor = m.AddGlobal(&Global{Name: "cursor", Type: I32, Mutable: true})
+	r.CurEnd = m.AddGlobal(&Global{Name: "cursor_end", Type: I32, Mutable: true})
 	r.IntCache = m.AddGlobal(&Global{Name: "int_cache", Type: I32, Mutable: true})
 	r.HeapMax = m.AddGlobal(&Global{Name: "heap_max", Type: I32, Mutable: true})
 	r.CmpDepth = m.AddGlobal(&Global{Name: "cmp_depth", Type: I32, Mutable: true})
@@ -207,10 +222,15 @@ func New(m *Module, cfg Config) *RT {
 	m.PutU32(r.True+offBool, 1)
 	r.scratch = m.Static(16, 8)
 
-	r.fdWrite = m.AddImport(&Import{Module: "wasi_snapshot_preview1", Name: "fd_write",
-		Type: FuncType{Params: p4, Results: r1}})
-	r.procExit = m.AddImport(&Import{Module: "wasi_snapshot_preview1", Name: "proc_exit",
-		Type: FuncType{Params: p1}})
+	if cfg.NoWASI {
+		r.hostPrint = m.AddImport(&Import{Module: HostModule, Name: HostPrint, Type: FuncType{Params: p2}})
+	} else {
+		r.fdWrite = m.AddImport(&Import{Module: "wasi_snapshot_preview1", Name: "fd_write",
+			Type: FuncType{Params: p4, Results: r1}})
+		r.procExit = m.AddImport(&Import{Module: "wasi_snapshot_preview1", Name: "proc_exit",
+			Type: FuncType{Params: p1}})
+	}
+	r.hostRes = m.AddImport(&Import{Module: HostModule, Name: HostResult, Type: FuncType{Params: p1}})
 
 	r.registerCore()
 	r.registerNum()
@@ -221,6 +241,7 @@ func New(m *Module, cfg Config) *RT {
 	r.registerCallExtras()
 	r.registerBuiltins()
 	r.registerABI()
+	r.registerHost()
 	return r
 }
 
@@ -547,9 +568,14 @@ func (r *RT) registerCore() {
 		f.Add(Unreachable())
 	})
 
-	// write(fd, str) -> errno
+	// write(fd, str) -> errno. Without WASI, only print writes (fd 1),
+	// and the text goes to the host.
 	r.define("write", p2, r1, func(f *Func) {
 		fd, s := f.Param(0), f.Param(1)
+		if r.Cfg.NoWASI {
+			f.Add(Call(r.hostPrint, add(get(s), c32(offStrBytes)), ld(get(s), offStrLen)), c32(0))
+			return
+		}
 		iov := r.scratch
 		f.Add(
 			st(addr(iov), 0, add(get(s), c32(offStrBytes))),
@@ -562,7 +588,7 @@ func (r *RT) registerCore() {
 	r.define("type_name", p1, r1, func(f *Func) {
 		v := f.Param(0)
 		names := []string{"NoneType", "bool", "int", "float", "string", "tuple", "list", "dict",
-			"function", "builtin_function_or_method", "cell", "range", "builtin_function_or_method"}
+			"function", "builtin_function_or_method", "cell", "range", "builtin_function_or_method", "module"}
 		body := r.S("unknown")
 		for t := len(names) - 1; t >= 0; t-- {
 			body = IfV(I32, isTag(get(v), t), r.S(names[t]), body)

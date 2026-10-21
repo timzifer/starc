@@ -6,6 +6,36 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+* Host functions: `Options.Host` (`-host`) declares functions that the
+  embedder provides. They are imported from `starc_host` and called with
+  the `abi` encoding; their errors become Starlark errors. Dotted names
+  such as `ctx.entity` predeclare values of the new type `module`.
+  Package `host` implements them through `Config.Funcs`.
+* `Options.NoWASI` (`-no-wasi`) builds reactor modules that import
+  nothing outside `starc_host`; `print` goes to the host import
+  `starc_print`. `host.Load` verifies the imports of a module.
+* `abi.DecodeCall` decodes encoded call arguments.
+* `abi.MaxDepth`: the decoder rejects values nested more than 10000
+  levels deep instead of exhausting the stack.
+* `starc.meta` lists the imported host functions (`host`) and marks
+  modules built without WASI (`no_wasi`).
+
+### Changed
+
+* Modules check the bounds of encoded call arguments: truncated values,
+  invalid tags and trailing bytes are Starlark errors instead of reads
+  beyond the buffer.
+* The error for a value that cannot cross the host boundary now reads
+  "cannot pass value of type … to the host".
+* `host.Module.Call` fails when a host function calls back into its own
+  module, which would reset the arena of the suspended call.
+
+### Fixed
+
+* `host.Load` releases the compiled module once it is instantiated.
+
 ## [0.1.1] - 2026-10-20
 
 ### Changed

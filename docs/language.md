@@ -9,7 +9,8 @@ runs every program with both implementations and compares the results.
 ## Supported
 
 **Types:** `NoneType`, `bool`, `int` (64-bit), `float`, `string`, `list`,
-`tuple`, `dict`, `range`, `function`, `builtin_function_or_method`.
+`tuple`, `dict`, `range`, `function`, `builtin_function_or_method`,
+`module` (predeclared host modules, see below).
 
 **Expressions:** literals (string, int, float, list, tuple, dict),
 arithmetic `+ - * / // %`, bitwise `& | ^ ~ << >>`, comparisons, `in` /
@@ -31,6 +32,14 @@ Recursion is rejected at run time unless the `Recursion` option is set.
 **Dialect options** (`starc.Dialect` / CLI flags): `While` (`while`
 loops), `TopLevelControl` (`if`/`for`/`while` at top level),
 `GlobalReassign`, `Recursion`.
+
+**Host functions** (`starc.Options.Host` / `-host`) are predeclared
+builtins implemented by the embedder. A dotted name such as `ctx.entity`
+predeclares the module `ctx`, which behaves like a `starlarkstruct.Module`
+in go.starlark.net: `type(ctx)` is `"module"`, `str(ctx)` is
+`<module "ctx">`, members are accessible with `.`, `getattr`, `hasattr`
+and `dir`, and modules are unhashable. See
+[abi.md](abi.md#host-functions).
 
 ### Built-in functions
 
@@ -76,6 +85,8 @@ loops), `TopLevelControl` (`if`/`for`/`while` at top level),
 * Case conversion and character classification (`upper`, `isalpha`, …)
   handle ASCII only.
 * Error messages are similar but not always identical to the reference.
+* Accessing a member that a predeclared host module lacks, such as
+  `ctx.nope`, is a compile-time error rather than a run-time error.
 * There is no garbage collector: memory allocated during initialization
   or during one exported call is reclaimed only when the next call starts.
   Very long-running calls can therefore use a lot of memory.

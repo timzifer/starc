@@ -50,9 +50,9 @@ starc run examples/fib.wasm fib 40      # call an exported function (JSON argume
 starc run examples/wordcount.star count_words "a b a" 1
 ```
 
-Flags: `-o`, `-command`, `-export a,b`, `-no-names`, and the dialect flags
-`-while`, `-toplevel-control`, `-global-reassign`, `-recursion`. Run
-`starc help` for details.
+Flags: `-o`, `-command`, `-export a,b`, `-no-names`, `-host ctx.entity,now`,
+`-no-wasi`, and the dialect flags `-while`, `-toplevel-control`,
+`-global-reassign`, `-recursion`. Run `starc help` for details.
 
 ## Go package
 
@@ -83,6 +83,29 @@ defer m.Close(ctx)
 res, err := m.Call(ctx, "fib", 50)                                  // int64(12586269025)
 res, err  = m.CallKw(ctx, "greet", []any{"world"}, abi.NewDict("punct", "?"))
 ```
+
+### Host functions
+
+Embedders can give programs their own functions: declare them when
+compiling and implement them when loading. Dotted names become
+predeclared modules. With `NoWASI`, the module imports nothing but these
+functions, for sandboxes where WASI is not available:
+
+```go
+wasm, err := starc.Compile("bot.star", src, &starc.Options{
+	Host:   []starc.HostFunc{{Name: "ctx.entity"}, {Name: "ctx.now"}},
+	NoWASI: true,
+})
+m, err := host.Load(ctx, wasm, &host.Config{Funcs: map[string]host.Func{
+	"ctx.entity": func(ctx context.Context, args []any, kw *abi.Dict) (any, error) {
+		return abi.NewDict("id", args[0], "pos", []any{1.5, 2.0}), nil
+	},
+	"ctx.now": func(context.Context, []any, *abi.Dict) (any, error) { return 12.5, nil },
+}})
+```
+
+The program calls `ctx.entity(7)`; an error returned by a host function
+becomes a Starlark error.
 
 ## Module interface
 

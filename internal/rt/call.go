@@ -130,10 +130,15 @@ func (r *RT) registerCall() {
 		)
 	})
 
-	// method_lookup(recv, id) -> callable or 0
+	// method_lookup(recv, id) -> callable or 0. For a module, it is the
+	// member with that name.
 	r.define("method_lookup", p2, r1, func(f *Func) {
 		f.Add(Raw(func() Expr {
-			return ld(add(addr(r.methodTable), I32Shl(add(mul(tagOf(get(f.Param(0))), c32(len(r.methodNames))), get(f.Param(1))), c32(2))), 0)
+			lookup := ld(add(addr(r.methodTable), I32Shl(add(mul(tagOf(get(f.Param(0))), c32(len(r.methodNames))), get(f.Param(1))), c32(2))), 0)
+			if !r.modules {
+				return lookup
+			}
+			return IfV(I32, isTag(get(f.Param(0)), TModule), r.Call("module_member", get(f.Param(0)), get(f.Param(1))), lookup)
 		}))
 	})
 	// method_name(id) -> string
@@ -163,13 +168,19 @@ func (r *RT) registerCall() {
 			get(m),
 		)
 	})
-	// attr(x, id) -> bound method
+	// attr(x, id) -> bound method, or the member of a module
 	r.define("attr", p2, r1, func(f *Func) {
 		x, id := f.Param(0), f.Param(1)
 		m, b := f.Local(I32), f.Local(I32)
 		f.Add(
 			Set(m, r.Call("method_lookup", get(x), get(id))),
 			If(eqz(get(m)), r.Fail(r.TypeName(get(x)), " has no .", r.Call("method_name", get(id)), " field or method")),
+			Raw(func() Expr {
+				if !r.modules {
+					return Nop()
+				}
+				return If(isTag(get(x), TModule), Return(get(m)))
+			}),
 			Set(b, r.Call("alloc", c32(12))),
 			st(get(b), 0, c32(TBound)),
 			st(get(b), offBoundFn, get(m)),

@@ -92,6 +92,8 @@ type buildOpts struct {
 	command bool
 	exports string
 	noNames bool
+	host    string
+	noWASI  bool
 	dialect starc.Dialect
 }
 
@@ -103,6 +105,8 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 	fs.BoolVar(&o.command, "command", false, "build a WASI command (_start) instead of a reactor with exports")
 	fs.StringVar(&o.exports, "export", "", "comma-separated functions to export (default: all public top-level functions)")
 	fs.BoolVar(&o.noNames, "no-names", false, "omit the debug name section")
+	fs.StringVar(&o.host, "host", "", "comma-separated host functions to import, such as ctx.entity,now")
+	fs.BoolVar(&o.noWASI, "no-wasi", false, "import nothing but host functions (print goes to the host)")
 	fs.BoolVar(&o.dialect.While, "while", false, "allow while loops")
 	fs.BoolVar(&o.dialect.TopLevelControl, "toplevel-control", false, "allow if/for/while at top level")
 	fs.BoolVar(&o.dialect.GlobalReassign, "global-reassign", false, "allow reassignment of top-level names")
@@ -115,18 +119,27 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 }
 
 func (o *buildOpts) options() *starc.Options {
-	opts := &starc.Options{NoNames: o.noNames, Dialect: o.dialect}
+	opts := &starc.Options{NoNames: o.noNames, NoWASI: o.noWASI, Dialect: o.dialect}
 	if o.command {
 		opts.ExecModel = starc.Command
 	}
-	if o.exports != "" {
-		for _, e := range strings.Split(o.exports, ",") {
-			if e = strings.TrimSpace(e); e != "" {
-				opts.Exports = append(opts.Exports, e)
-			}
-		}
+	opts.Exports = splitList(o.exports)
+	for _, h := range splitList(o.host) {
+		opts.Host = append(opts.Host, starc.HostFunc{Name: h})
 	}
 	return opts
+}
+
+// splitList splits a comma-separated flag value; it returns nil if
+// there are no elements.
+func splitList(s string) []string {
+	var out []string
+	for _, e := range strings.Split(s, ",") {
+		if e = strings.TrimSpace(e); e != "" {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // compileInput compiles the named input ("-" for stdin).
@@ -204,7 +217,7 @@ func runCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		wasm, err = os.ReadFile(in)
 	} else {
 		opts := o.options()
-		if fs.NArg() == 1 && !o.command {
+		if fs.NArg() == 1 && !o.command && !o.noWASI {
 			// Without a function to call, run the program as a command so
 			// that errors are reported on stderr with a non-zero status.
 			opts.ExecModel = starc.Command

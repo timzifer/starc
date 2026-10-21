@@ -56,6 +56,23 @@ type Options struct {
 	// NoNames omits the "name" custom section (debug function names).
 	NoNames bool
 	Dialect Dialect
+	// Host declares functions that the embedder provides. They are
+	// imported from the module "starc_host" and appear to the program as
+	// predeclared builtins, or as members of predeclared modules for
+	// dotted names. Package host supplies them through Config.Funcs.
+	Host []HostFunc
+	// NoWASI builds a module that imports nothing outside "starc_host":
+	// print calls the host import starc_print, and errors are reported
+	// through starc_error only. It cannot be combined with Command.
+	NoWASI bool
+}
+
+// HostFunc declares a function provided by the host.
+type HostFunc struct {
+	// Name is the function's name, optionally qualified by modules, for
+	// example "now" or "ctx.entity". The program calls it as ctx.entity(...);
+	// ctx is then a predeclared module value.
+	Name string
 }
 
 // Position is a source location.
@@ -99,10 +116,16 @@ func Compile(filename string, src []byte, opts *Options) ([]byte, error) {
 	if opts == nil {
 		opts = &Options{}
 	}
+	var host []string
+	for _, h := range opts.Host {
+		host = append(host, h.Name)
+	}
 	bin, err := compiler.Compile(filename, src, compiler.Options{
 		Command: opts.ExecModel == Command,
 		Exports: opts.Exports,
 		Names:   !opts.NoNames,
+		Host:    host,
+		NoWASI:  opts.NoWASI,
 		Dialect: syntax.FileOptions{
 			While:           opts.Dialect.While,
 			TopLevelControl: opts.Dialect.TopLevelControl,
