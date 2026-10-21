@@ -168,8 +168,10 @@ func (r *RT) registerColl() {
 			Set(x, i64v(get(nv))),
 			If(I64LtS(get(x), I64c(0)), Set(x, I64c(0))),
 			Set(sz, ld(get(s), 4)),
-			If(and(ne(get(sz), c32(0)), I64GtS(get(x), I64DivS(I64c(1<<28), I64ExtendI32U(get(sz))))),
-				r.Fail("excessive repeat")),
+			// and() evaluates both operands, so the division needs its own If.
+			If(eq(get(sz), c32(0)), Set(x, I64c(0))),
+			If(ne(get(sz), c32(0)),
+				If(I64GtS(get(x), I64DivS(I64c(1<<28), I64ExtendI32U(get(sz)))), r.Fail("excessive repeat"))),
 			Set(n, I32WrapI64(get(x))),
 			If(eq(get(t), c32(TString)), Seq{
 				Set(res, r.Call("str_new", mul(get(sz), get(n)))),
