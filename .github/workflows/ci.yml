@@ -47,12 +47,43 @@ jobs:
       - name: Report and check threshold
         run: ./scripts/coverage.sh coverage.out
       - name: Upload HTML report
+        if: ${{ !cancelled() && hashFiles('coverage-badge.json') != '' }}
         uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: |
             coverage.out
             coverage.html
+            coverage-badge.json
+
+  # Publishes the badge description to the orphan branch "badges", from
+  # where shields.io renders the README badge. Kept in its own job so only
+  # this job, and only on main, gets write access.
+  coverage-badge:
+    name: Coverage badge
+    needs: coverage
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: coverage-report
+      - name: Push to badges branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dir="$(mktemp -d)"
+          cp coverage-badge.json "$dir/coverage.json"
+          cd "$dir"
+          git init -q -b badges
+          git add coverage.json
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -q -m "Update coverage badge for ${GITHUB_SHA::7}"
+          # A single force-pushed commit keeps the branch from growing.
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges
 
   lint:
     name: Lint

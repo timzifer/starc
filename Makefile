@@ -35,4 +35,4 @@ release-snapshot:
 	$(GO) run github.com/goreleaser/goreleaser/v2@latest release --snapshot --clean
 
 clean:
-	rm -rf starc dist coverage.out coverage.html
+	rm -rf starc dist coverage.out coverage.html coverage-badge.json

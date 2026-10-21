@@ -14,6 +14,7 @@
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*
+coverage-badge.json
 !coverage.go
 !scripts/coverage.sh
 *.coverprofile
