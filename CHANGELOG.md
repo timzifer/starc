@@ -96,6 +96,11 @@ and the project follows [Semantic Versioning](https://semver.org/).
 * `host.Load` releases the compiled module once it is instantiated.
 * Repeating an empty string, list or tuple (`"" * 3`) no longer traps
   with an integer division by zero.
+* `repr` and everything that quotes strings escape like go.starlark.net:
+  `\a \b \f \v` instead of `\x07`…, non-printable code points (such as
+  U+00A0 or U+2028) as `\u`/`\U` escapes, and bytes that are not valid
+  UTF-8 as `\x` escapes, so the result is always valid UTF-8. Printable
+  means `strconv.IsPrint` of the Go release that builds starc.
 
 ## [0.1.1] - 2026-10-20
 

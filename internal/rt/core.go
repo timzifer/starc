@@ -276,6 +276,7 @@ func New(m *Module, cfg Config) *RT {
 	r.registerCore()
 	r.registerNum()
 	r.registerStr()
+	r.registerUnicode()
 	r.registerDecimal()
 	r.registerColl()
 	r.registerCall()

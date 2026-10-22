@@ -185,41 +185,75 @@ func (r *RT) registerStr() {
 	})
 	r.defineFloatToStr()
 
-	// quote(s) -> Starlark string literal
+	// quote(s) -> Starlark string literal, as syntax.Quote: printable code
+	// points as they are, others and invalid UTF-8 bytes escaped
 	r.define("quote", p1, r1, func(f *Func) {
 		s := f.Param(0)
-		buf, p, i, c, out := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
-		esc := func(ch byte) Expr {
-			return Seq{I32Store8(get(p), 0, c32('\\')), I32Store8(get(p), 1, c32(int(ch))), Set(p, add(get(p), c32(2)))}
+		buf, p, i, c, w, d, out := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
+		brk, cont := NewLabel(), NewLabel()
+		esc := func(ch byte) []Expr {
+			return []Expr{I32Store8(get(p), 0, c32('\\')), I32Store8(get(p), 1, c32(int(ch))), Set(p, add(get(p), c32(2)))}
 		}
 		const hex = "0123456789abcdef"
 		hexTab := r.Str(hex)
+		// hexEsc writes \<ch> and the low n hex digits of c.
+		hexEsc := func(ch byte, n int) []Expr {
+			out := esc(ch)
+			for k := 0; k < n; k++ {
+				out = append(out, I32Store8(get(p), uint32(k), I32Load8U(
+					add(addr(hexTab+offStrBytes), and(I32ShrU(get(c), c32(4*(n-1-k))), c32(15))), 0)))
+			}
+			return append(out, Set(p, add(get(p), c32(n))))
+		}
+		copyByte := func(k uint32) Expr {
+			return I32Store8(get(p), k, I32Load8U(add(sbytes(get(s)), get(i)), k))
+		}
+		// Control characters with a short escape, in syntax.Quote's order.
+		short := []struct {
+			c  int
+			ch byte
+		}{{'\a', 'a'}, {'\b', 'b'}, {'\f', 'f'}, {'\n', 'n'}, {'\r', 'r'}, {'\t', 't'}, {'\v', 'v'}}
+		nonPrint := IfElse(or(I32LtU(get(c), c32(0x20)), eq(get(c), c32(0x7f))), hexEsc('x', 2), []Expr{
+			IfElse(I32LtU(get(c), c32(0x10000)), hexEsc('u', 4), hexEsc('U', 8)),
+		})
+		for k := len(short) - 1; k >= 0; k-- {
+			nonPrint = IfElse(eq(get(c), c32(short[k].c)), esc(short[k].ch), []Expr{nonPrint})
+		}
 		f.Add(
+			// Each byte becomes at most 4 bytes (\xNN; \UNNNNNNNN encodes 4).
 			Set(buf, r.Call("alloc", add(mul(slen(get(s)), c32(4)), c32(2)))),
 			Set(p, get(buf)),
 			I32Store8(get(p), 0, c32('"')), Set(p, add(get(p), c32(1))),
-			r.forRange(i, c32(0), slen(get(s)),
+			Block(brk, r.loop(cont,
+				BrIf(brk, ge(get(i), slen(get(s)))),
 				Set(c, I32Load8U(add(sbytes(get(s)), get(i)), 0)),
-				IfElse(eq(get(c), c32('"')), []Expr{esc('"')}, []Expr{
-					IfElse(eq(get(c), c32('\\')), []Expr{esc('\\')}, []Expr{
-						IfElse(eq(get(c), c32('\n')), []Expr{esc('n')}, []Expr{
-							IfElse(eq(get(c), c32('\t')), []Expr{esc('t')}, []Expr{
-								IfElse(eq(get(c), c32('\r')), []Expr{esc('r')}, []Expr{
-									IfElse(or(I32LtU(get(c), c32(0x20)), eq(get(c), c32(0x7f))), []Expr{
-										I32Store8(get(p), 0, c32('\\')),
-										I32Store8(get(p), 1, c32('x')),
-										I32Store8(get(p), 2, I32Load8U(add(addr(hexTab+offStrBytes), I32ShrU(get(c), c32(4))), 0)),
-										I32Store8(get(p), 3, I32Load8U(add(addr(hexTab+offStrBytes), and(get(c), c32(15))), 0)),
-										Set(p, add(get(p), c32(4))),
-									}, []Expr{
-										I32Store8(get(p), 0, get(c)), Set(p, add(get(p), c32(1))),
-									}),
-								}),
-							}),
-						}),
+				Set(w, c32(1)),
+				If(I32GeU(get(c), c32(0x80)), Seq{
+					Set(d, r.Call("utf8_decode", add(sbytes(get(s)), get(i)), sub(slen(get(s)), get(i)))),
+					Set(c, and(get(d), c32(1<<runeShift-1))),
+					Set(w, I32ShrU(get(d), c32(runeShift))),
+				}),
+				IfElse(and(eq(get(w), c32(1)), eq(get(c), c32(runeError))), []Expr{
+					Set(c, I32Load8U(add(sbytes(get(s)), get(i)), 0)),
+					Seq(hexEsc('x', 2)),
+				}, []Expr{
+					IfElse(or(eq(get(c), c32('"')), eq(get(c), c32('\\'))), []Expr{
+						I32Store8(get(p), 0, c32('\\')), I32Store8(get(p), 1, get(c)), Set(p, add(get(p), c32(2))),
+					}, []Expr{
+						IfElse(IfV(I32, I32LtU(get(c), c32(0x80)),
+							and(I32GeU(get(c), c32(0x20)), I32LtU(get(c), c32(0x7f))),
+							r.Call("is_print", get(c))), []Expr{
+							copyByte(0),
+							If(gt(get(w), c32(1)), Seq{copyByte(1),
+								If(gt(get(w), c32(2)), Seq{copyByte(2),
+									If(gt(get(w), c32(3)), copyByte(3))})}),
+							Set(p, add(get(p), get(w))),
+						}, []Expr{nonPrint}),
 					}),
 				}),
-			),
+				Set(i, add(get(i), get(w))),
+				Br(cont),
+			)),
 			I32Store8(get(p), 0, c32('"')), Set(p, add(get(p), c32(1))),
 			Set(out, r.Call("str_from", get(buf), sub(get(p), get(buf)))),
 			get(out),
