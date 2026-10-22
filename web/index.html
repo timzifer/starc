@@ -6,6 +6,7 @@
 <title>starc playground</title>
 <meta name="description" content="Compile Starlark to WebAssembly and run it in your browser, with deterministic fuel metering.">
 <link rel="stylesheet" href="style.css">
+<script src="coi.js"></script>
 <script src="wasm_exec.js"></script>
 <script type="module" src="app.mjs"></script>
 </head>
@@ -36,6 +37,7 @@
       <textarea id="source" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Starlark source"></textarea>
     </div>
     <ul id="diagnostics" class="diagnostics" aria-live="polite"></ul>
+    <p class="hint">Click a line number to set a breakpoint, then Debug.</p>
   </section>
 
   <section class="run">
@@ -50,6 +52,30 @@
         <input id="budget" type="number" min="1" value="1000000">
       </label>
       <button id="run" disabled>Run <kbd>Ctrl</kbd>+<kbd>Enter</kbd></button>
+      <button id="debug" class="secondary" disabled>Debug <kbd>F5</kbd></button>
+      <label class="check"><input type="checkbox" id="stop-errors" checked> stop at errors</label>
+    </div>
+
+    <div id="debugger" class="debugger" hidden>
+      <div class="dbg-bar">
+        <button id="dbg-continue" title="Continue (F8)">Continue</button>
+        <button id="dbg-pause" title="Pause at the next statement">Pause</button>
+        <button id="dbg-over" title="Step over (F10)">Step over</button>
+        <button id="dbg-into" title="Step into (F11)">Step into</button>
+        <button id="dbg-out" title="Step out (Shift+F11)">Step out</button>
+        <button id="dbg-stop" class="danger" title="Stop (Shift+F5)">Stop</button>
+        <span id="dbg-state" class="status"></span>
+      </div>
+      <div class="dbg-panels">
+        <div>
+          <h2>Call stack</h2>
+          <ol id="dbg-stack" class="dbg-stack"></ol>
+        </div>
+        <div>
+          <h2>Variables</h2>
+          <table id="dbg-vars" class="dbg-vars"><tbody></tbody></table>
+        </div>
+      </div>
     </div>
 
     <dl class="summary">

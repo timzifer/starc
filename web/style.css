@@ -165,3 +165,38 @@ h2 { font-size: 0.9rem; margin: 12px 0 4px; color: var(--muted); font-weight: 60
 .profile td .kind { color: var(--muted); font-size: 0.75rem; margin-left: 6px; }
 
 footer { color: var(--muted); font-size: 0.8rem; padding: 16px; }
+
+/* ---- debugger ---- */
+label.check { flex-direction: row; align-items: center; gap: 4px; align-self: center; }
+.hint { font-size: 0.8rem; color: var(--muted); margin: 6px 0 0; }
+#gutter span { display: block; cursor: pointer; position: relative; padding-left: 14px; }
+#gutter span.bp::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--error);
+}
+#gutter span.cur { background: var(--accent); color: var(--accent-fg); border-radius: 3px; }
+#gutter span.cur.errstop { background: var(--error); }
+button.danger { background: var(--error); border-color: var(--error); color: #fff; }
+.debugger { border: 1px solid var(--accent); border-radius: 8px; padding: 8px; margin: 4px 0 10px; }
+.dbg-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.dbg-bar button { min-height: 30px; padding: 3px 10px; font-size: 0.85rem; }
+.dbg-panels { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 10px; }
+@media (max-width: 600px) { .dbg-panels { grid-template-columns: minmax(0, 1fr); } }
+.dbg-stack { list-style: none; margin: 0; padding: 0; font: 0.85rem var(--mono); }
+.dbg-stack li { padding: 3px 6px; border-radius: 4px; cursor: pointer; overflow-wrap: anywhere; }
+.dbg-stack li.sel { background: var(--code-bg); outline: 1px solid var(--border); }
+.dbg-stack li .where { color: var(--muted); margin-left: 6px; }
+.dbg-stack li.builtin { color: var(--muted); cursor: default; }
+.dbg-vars { width: 100%; border-collapse: collapse; font: 0.85rem var(--mono); }
+.dbg-vars td { padding: 2px 6px; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
+.dbg-vars td:first-child { white-space: nowrap; width: 1%; }
+.dbg-vars tr.section td { color: var(--muted); font: 600 0.75rem system-ui, sans-serif; padding-top: 6px; }
+.dbg-vars .unbound { color: var(--muted); font-style: italic; }
+.dbg-error { color: var(--error); font: 0.85rem var(--mono); margin: 6px 0 0; white-space: pre-wrap; }
