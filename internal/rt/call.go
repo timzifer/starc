@@ -220,6 +220,18 @@ func (r *RT) registerCallExtras() {
 			r.Call("add", get(a), get(b)),
 		)
 	})
+	// inplace_or(a, b): a |= b (dicts are updated in place)
+	r.define("inplace_or", p2, r1, func(f *Func) {
+		a, b := f.Param(0), f.Param(1)
+		f.Add(
+			If(and(isTag(get(a), TDict), isTag(get(b), TDict)), Seq{
+				r.Call("dict_check_mut", get(a)),
+				r.Call("dict_merge", get(a), get(b)),
+				Return(get(a)),
+			}),
+			r.Call("bitor", get(a), get(b)),
+		)
+	})
 	// truth_bool(v) -> True/False object
 	r.define("to_bool", p1, r1, func(f *Func) {
 		f.Add(r.bool(r.Call("truth", get(f.Param(0)))))
