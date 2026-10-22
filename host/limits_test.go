@@ -237,3 +237,45 @@ func TestLimitOptions(t *testing.T) {
 		}
 	}
 }
+
+// TestReprAfterDepthError checks that a repr that fails because a value
+// is nested too deeply leaves no marks behind, which would make a later
+// repr of the same (global) value print it as a cycle.
+func TestReprAfterDepthError(t *testing.T) {
+	ctx := context.Background()
+	src := `
+def mk():
+    d = []
+    for _ in range(480):
+        d = [d]
+    return d
+
+G = mk()
+
+def deep(n):
+    if n == 0:
+        return repr(G)
+    return deep(n - 1)
+
+def f():
+    return deep(30)
+
+def g():
+    return repr(G)[-8:]
+`
+	wasm, err := starc.Compile("r.star", []byte(src), &starc.Options{Dialect: starc.Dialect{Recursion: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := host.Load(ctx, wasm, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(ctx)
+	if _, err := m.Call(ctx, "f"); !errors.Is(err, host.ErrCallDepth) {
+		t.Fatalf("f: %v", err)
+	}
+	if res, err := m.Call(ctx, "g"); err != nil || res != "]]]]]]]]" {
+		t.Errorf("g = %q, %v", res, err)
+	}
+}
