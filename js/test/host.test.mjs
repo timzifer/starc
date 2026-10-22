@@ -87,4 +87,18 @@ test("calls with JavaScript values", async () => {
     const host = Object.defineProperty({}, name, { value: () => `own ${name}`, enumerable: true });
     assert.equal((await load(wasm, { host })).call("f"), `own ${name}`, name);
   }
+
+  // initFuel 0 is unlimited, as a number and as a bigint (issue #50).
+  const fueled = compiler.compile("x = 1\n\ndef f():\n    return x\n", { filename: "fuel.star", noWasi: true, fuel: true }).wasm;
+  const unlimited = (await load(fueled)).fuel();
+  for (const initFuel of [0, 0n]) {
+    const fm = await load(fueled, { initFuel });
+    assert.equal(fm.fuel(), unlimited, `initFuel ${typeof initFuel}`);
+    assert.equal(fm.call("f"), 1);
+  }
+  for (const initFuel of [1, 1n]) {
+    await assert.rejects(load(fueled, { initFuel }), (e) => e instanceof StarlarkError && e.code === ErrorCode.FUEL, `initFuel ${typeof initFuel}`);
+  }
+  const limited = await load(fueled, { initFuel: 100000n });
+  assert.ok(limited.fuel() < 100000n, "a finite budget is used");
 });

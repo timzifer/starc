@@ -613,7 +613,8 @@ export class Module {
     const inst = await WebAssembly.instantiate(this._mod, imports);
     this._exports = inst.exports;
     this._startDebugger();
-    if (cfg.initFuel !== undefined && cfg.initFuel !== 0) this.setFuel(cfg.initFuel);
+    // 0 and 0n are both unlimited.
+    if (cfg.initFuel !== undefined && BigInt(cfg.initFuel) !== 0n) this.setFuel(cfg.initFuel);
     if (this.meta.model !== "reactor") {
       try {
         this._exports._start();
