@@ -83,7 +83,7 @@ export interface Config {
   /** Output of print (and of errors of command modules on stderr). */
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
-  /** Host functions by their dotted names. */
+  /** Host functions by their dotted names; only own properties count. */
   host?: Record<string, HostFunc>;
   /** Fuel budget of the top-level code; 0 or absent is unlimited. */
   initFuel?: number | bigint;
