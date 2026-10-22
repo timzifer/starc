@@ -457,6 +457,9 @@ func (fc *fcomp) binop(op syntax.Token, x, y Expr, inplace bool, pos syntax.Posi
 	if inplace && op == syntax.PLUS {
 		return r.Call("inplace_add", x, y)
 	}
+	if inplace && op == syntax.PIPE {
+		return r.Call("inplace_or", x, y)
+	}
 	return r.Call(rt.BinOps[binopNames[op]], x, y)
 }
 

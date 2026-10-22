@@ -107,6 +107,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
   bytes, so `replace` no longer splits multi-byte characters.
   `find("", start, end)` and `rfind` with `end < start` return `start`,
   as in go.starlark.net.
+* `d |= x` updates the dict `d` in place, so other references to it see
+  the change, as in go.starlark.net.
 
 ## [0.1.1] - 2026-10-20
 

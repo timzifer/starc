@@ -21,10 +21,10 @@ with positional, keyword, `*args` and `**kwargs` arguments, `lambda`,
 list and dict comprehensions, `%` string formatting, dict union `|`.
 
 **Statements:** assignment (including tuple/list unpacking and indexed
-targets), augmented assignment (`+=` extends lists in place), `if` /
-`elif` / `else`, `for`, `break`, `continue`, `pass`, `return`, `def`
-(default values, keyword-only parameters, `*args`, `**kwargs`) and nested
-functions with closures.
+targets), augmented assignment (`+=` extends lists and `|=` updates dicts in
+place), `if` / `elif` / `else`, `for`, `break`, `continue`, `pass`,
+`return`, `def` (default values, keyword-only parameters, `*args`,
+`**kwargs`) and nested functions with closures.
 
 **Semantics:** values are frozen after module initialization; mutating a
 frozen value, or a list or dict while it is being iterated, is an error.

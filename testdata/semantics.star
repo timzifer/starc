@@ -96,3 +96,31 @@ print(a | b, b | a, a)
 print([1, 2] + [3], (1,) + (2, 3), "ab" + "cd", [0] * 3, 3 * (1, 2), -2 * [1])
 print("" * 3, [] * 2, 5 * (), "" * -1, [] * 9223372036854775807)
 print(1 if [] else 2, [] or {} or "last", "first" and 0)
+---
+# |= updates a dict in place, like += extends a list.
+a = {"x": 1}
+b = a
+b |= {"y": 2}
+c = {"z": 0}
+c |= c
+b["w"] = 3
+print(a, b, c)
+d = {"k": {"p": 1}}
+inner = d["k"]
+d["k"] |= {"q": 2}
+print(d, inner)
+s = set([1])
+t = s
+t |= set([2])
+n = 6
+n |= 1
+print(s, t, n)
+l = [1]
+m = l
+m += (2, 3)
+print(l, m)
+---
+# |= on a dict being iterated fails.
+d = {"a": 1}
+for k in d:
+    d |= {}
