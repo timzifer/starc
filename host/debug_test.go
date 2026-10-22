@@ -2,8 +2,8 @@ package host_test
 
 import (
 	"bytes"
-	"errors"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
