@@ -82,6 +82,8 @@ button {
   cursor: pointer;
 }
 button:disabled { opacity: 0.5; cursor: default; }
+button.secondary { background: var(--bg); color: var(--fg); border-color: var(--border); font-weight: 500; }
+.downloads { display: flex; gap: 6px; margin-left: auto; }
 kbd { font: 0.75rem var(--mono); opacity: 0.8; }
 
 .status { font-size: 0.85rem; color: var(--muted); }

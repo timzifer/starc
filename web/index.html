@@ -25,6 +25,11 @@
         <select id="example"></select>
       </label>
       <span id="status" class="status">Loading the compiler…</span>
+      <span class="downloads">
+        <button id="download-wasm" class="secondary" disabled
+          title="The compiled module: a WASI reactor with fuel metering. Run it with &quot;starc run program.wasm fn args&quot;, package host or host.mjs.">Download .wasm</button>
+        <button id="download-star" class="secondary" title="The source of the program">.star</button>
+      </span>
     </div>
     <div class="code">
       <pre id="gutter" aria-hidden="true"></pre>
