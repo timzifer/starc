@@ -8,6 +8,12 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+* The playground has a debugger: breakpoints on line numbers, Continue,
+  Pause, Step over/into/out and Stop, the call stack and the variables of
+  each frame, and stops at errors. The program runs natively in a Web
+  Worker that blocks at a stop; a small service worker (`web/coi.js`)
+  makes GitHub Pages cross-origin isolated for the shared memory this
+  needs.
 * Debuggers stop at run-time errors too, before the call ends
   (`host.Debugger.Errors`, `Stop.Err`), with the stack and variables at
   the error; `js/host.mjs` gets the debugger of the Go host (`debug` in

@@ -11,6 +11,29 @@ Try it in the [playground](https://timzifer.github.io/starc/), which is
 built from [`web/`](../web) and deployed to GitHub Pages on every push to
 `main`.
 
+## Playground debugger
+
+The playground debugs programs as they run, at native speed. **Debug**
+(F5) compiles a debug build and runs it in a Web Worker
+(`web/debug-worker.mjs`) with `host.mjs`; the page is a proxy that steers
+it. At every statement the module calls its debug hook, and the worker
+decides whether to stop: at a breakpoint (click a line number), after a
+step, when Pause was pressed, or at an error (with "stop at errors"). To
+stop, it sends the stack, the variables and the globals to the page and
+blocks in `Atomics.wait` until the page writes the next command into
+shared memory: Continue (F8), Step over (F10), Step into (F11), Step out
+(Shift+F11) or Stop (Shift+F5). Pause works at any time, also in an
+endless loop. Steps are statements: Step out stops at the next statement
+of a calling function, if any. As everywhere, stops change neither the
+results nor the fuel.
+
+`SharedArrayBuffer` needs a cross-origin isolated page, that is the
+headers `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`. GitHub Pages cannot send
+them, so `web/coi.js` registers a service worker that adds them to the
+playground's (same-origin) responses and reloads the page once. Hosts
+that send the headers themselves do not need it.
+
 ## Files
 
 | File | Contents |

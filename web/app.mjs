@@ -1,7 +1,9 @@
 // The starc playground: compiles Starlark in the browser with the
 // compiler built as WebAssembly and runs the module with host.mjs.
 import { loadCompiler } from "./compiler.mjs";
-import { load, StarlarkError, ExitError, Tuple, Struct, Opaque } from "./host.mjs";
+import { load, StarlarkError, ExitError } from "./host.mjs";
+import { show } from "./show.mjs";
+import { CMD, PAUSE, BREAKS_OFFSET, MAX_LINES, CONTINUE, STEP_INTO, STEP_OVER, STEP_OUT } from "./debug-protocol.mjs";
 
 const EXAMPLES = {
   "Fibonacci": {
@@ -100,20 +102,41 @@ const els = {
   result: $("result"), fuel: $("fuel"), module: $("module"), output: $("output"), profile: $("profile").tBodies[0],
   version: $("version"),
   downloadWasm: $("download-wasm"), downloadStar: $("download-star"),
+  debug: $("debug"), stopErrors: $("stop-errors"), debugger: $("debugger"), dbgState: $("dbg-state"),
+  dbgStack: $("dbg-stack"), dbgVars: $("dbg-vars").tBodies[0],
+  dbgContinue: $("dbg-continue"), dbgPause: $("dbg-pause"), dbgOver: $("dbg-over"), dbgInto: $("dbg-into"),
+  dbgOut: $("dbg-out"), dbgStop: $("dbg-stop"),
 };
 
 let compiler = null;
 let errorLines = new Set();
+const breakpoints = new Set(); // lines of the main file
+let dbg = null; // the running debugger, see debug()
+let stopLine = 0; // line of the current stop, 0 if none
+let stopIsError = false;
 
 // ---- editor ----
 
 function renderGutter() {
   const n = els.source.value.split("\n").length;
   let html = "";
-  for (let i = 1; i <= n; i++) html += errorLines.has(i) ? `<span class="err">${i}</span>\n` : `${i}\n`;
+  for (let i = 1; i <= n; i++) {
+    const cls = [breakpoints.has(i) && "bp", errorLines.has(i) && "err", i === stopLine && "cur", i === stopLine && stopIsError && "errstop"];
+    html += `<span data-line="${i}" class="${cls.filter(Boolean).join(" ")}">${i}</span>`;
+  }
   els.gutter.innerHTML = html;
   els.gutter.scrollTop = els.source.scrollTop;
 }
+
+// Clicking a line number toggles a breakpoint, also while debugging.
+els.gutter.addEventListener("click", (e) => {
+  const line = Number(e.target.closest("span")?.dataset.line);
+  if (!line) return;
+  if (breakpoints.has(line)) breakpoints.delete(line);
+  else breakpoints.add(line);
+  if (dbg && line < MAX_LINES) dbg.breaks[line] = breakpoints.has(line) ? 1 : 0;
+  renderGutter();
+});
 
 function goTo(line, col) {
   const lines = els.source.value.split("\n");
@@ -165,23 +188,6 @@ function loadFromHash() {
   } catch {
     return null;
   }
-}
-
-// ---- values ----
-
-function show(v) {
-  if (v === null || v === undefined) return "None";
-  if (v === true) return "True";
-  if (v === false) return "False";
-  if (typeof v === "bigint") return v.toString();
-  if (typeof v === "number") return Number.isNaN(v) ? "nan" : v === Infinity ? "+inf" : v === -Infinity ? "-inf" : String(v);
-  if (typeof v === "string") return JSON.stringify(v);
-  if (v instanceof Tuple) return v.length === 1 ? `(${show(v[0])},)` : `(${v.map(show).join(", ")})`;
-  if (Array.isArray(v)) return `[${v.map(show).join(", ")}]`;
-  if (v instanceof Map) return `{${[...v].map(([k, x]) => `${show(k)}: ${show(x)}`).join(", ")}}`;
-  if (v instanceof Struct) return `struct(${[...v.fields].map(([k, x]) => `${k} = ${show(x)}`).join(", ")})`;
-  if (v instanceof Opaque) return v.repr;
-  return String(v);
 }
 
 // ---- compile and run ----
@@ -270,13 +276,39 @@ function showError(e) {
   els.result.className = "error";
 }
 
-async function run() {
-  if (!compiler) return;
+/** Reads the fuel budget and the arguments; it reports errors and returns null. */
+function inputs() {
+  let budget;
+  try {
+    budget = BigInt(els.budget.value || "0");
+    if (budget <= 0n) throw new Error();
+  } catch {
+    appendOutput("The fuel budget must be a positive integer.\n", "err");
+    return null;
+  }
+  let args;
+  try {
+    args = JSON.parse(els.args.value || "[]");
+    if (!Array.isArray(args)) throw new Error("not an array");
+  } catch (e) {
+    appendOutput(`Arguments: ${e.message}; give a JSON array, such as [1, "two"].\n`, "err");
+    return null;
+  }
+  return { budget, args };
+}
+
+function resetResults() {
   els.output.replaceChildren();
   els.result.textContent = "–";
   els.result.className = "";
   els.fuel.textContent = "–";
   els.profile.replaceChildren();
+}
+
+async function run() {
+  if (!compiler) return;
+  stopDebugger();
+  resetResults();
   saveToHash();
 
   const t0 = performance.now();
@@ -291,14 +323,9 @@ async function run() {
   setStatus(`compiled in ${ms.toFixed(0)} ms`, "ok");
   els.module.textContent = `${(wasm.length / 1024).toFixed(1)} KiB`;
 
-  let budget;
-  try {
-    budget = BigInt(els.budget.value || "0");
-    if (budget <= 0n) throw new Error();
-  } catch {
-    appendOutput("The fuel budget must be a positive integer.\n", "err");
-    return;
-  }
+  const input = inputs();
+  if (!input) return;
+  const { budget, args } = input;
   const print = (s) => appendOutput(s);
   let m;
   try {
@@ -316,14 +343,6 @@ async function run() {
     showProfile(m.profile());
     return;
   }
-  let args;
-  try {
-    args = JSON.parse(els.args.value || "[]");
-    if (!Array.isArray(args)) throw new Error("not an array");
-  } catch (e) {
-    appendOutput(`Arguments: ${e.message}; give a JSON array, such as [1, "two"].\n`, "err");
-    return;
-  }
   m.resetProfile();
   m.setFuel(budget);
   try {
@@ -335,6 +354,202 @@ async function run() {
   els.fuel.textContent = `${(budget - m.fuel()).toLocaleString()} of ${budget.toLocaleString()}`;
   showProfile(m.profile());
 }
+
+// ---- debugger ----
+//
+// The program runs natively in a Web Worker (debug-worker.mjs), which
+// blocks in the debug hook at a stop; this page shows the stop and sends
+// commands through shared memory. SharedArrayBuffer needs cross-origin
+// isolation, which coi.js provides on hosts that cannot send the headers.
+
+const MAX_VALUE = 2000; // characters of a value shown
+
+function debug() {
+  if (!compiler) return;
+  if (!globalThis.crossOriginIsolated) {
+    setStatus("the debugger needs a cross-origin isolated page; reload to enable it", "error");
+    return;
+  }
+  stopDebugger();
+  resetResults();
+  saveToHash();
+  const { wasm, errors } = compiler.compile(els.source.value, { ...OPTIONS, profile: false, debug: true });
+  showDiagnostics(errors);
+  if (!wasm) {
+    setStatus(`${errors.length} compile error${errors.length === 1 ? "" : "s"}`, "error");
+    return;
+  }
+  els.module.textContent = `${(wasm.length / 1024).toFixed(1)} KiB (debug build)`;
+  const input = inputs();
+  if (!input) return;
+  const shared = new SharedArrayBuffer(BREAKS_OFFSET + MAX_LINES);
+  const breaks = new Uint8Array(shared, BREAKS_OFFSET);
+  for (const line of breakpoints) if (line < MAX_LINES) breaks[line] = 1;
+  const worker = new Worker("debug-worker.mjs", { type: "module" });
+  dbg = { worker, ctrl: new Int32Array(shared, 0, BREAKS_OFFSET / 4), breaks, stopped: false, frames: [], globals: [] };
+  worker.onmessage = ({ data }) => onDebugMessage(data);
+  worker.onerror = (e) => {
+    appendOutput(`debugger: ${e.message}\n`, "err");
+    stopDebugger();
+  };
+  worker.postMessage({
+    type: "start", wasm, fn: els.fn.value, args: input.args, budget: input.budget,
+    errors: els.stopErrors.checked, shared, filename: OPTIONS.filename,
+  });
+  els.debugger.hidden = false;
+  els.source.readOnly = true;
+  setDebugState("running");
+}
+
+function onDebugMessage(msg) {
+  if (!dbg) return;
+  switch (msg.type) {
+    case "output":
+      appendOutput(msg.text);
+      break;
+    case "stop":
+      dbg.stopped = true;
+      dbg.frames = msg.frames;
+      dbg.globals = msg.globals;
+      stopIsError = !!msg.err;
+      setDebugState(msg.err ? `stopped at an error: ${msg.err}` : `paused at line ${msg.pos.line}`, msg.err ? "error" : "ok");
+      // The innermost frame of the program is selected.
+      selectFrame(dbg.frames.length - 1);
+      break;
+    case "running":
+      dbg.stopped = false;
+      stopLine = 0;
+      els.dbgStack.replaceChildren();
+      els.dbgVars.replaceChildren();
+      setDebugState("running");
+      renderGutter();
+      break;
+    case "done": {
+      if (msg.aborted) appendOutput("stopped by the debugger\n", "err");
+      else if (msg.error) {
+        appendOutput(msg.error + "\n", "err");
+        if (msg.pos && msg.pos.file === OPTIONS.filename) errorLines = new Set([msg.pos.line]);
+        els.result.textContent = msg.code === 2 ? "fuel exhausted" : "error";
+        els.result.className = "error";
+      } else els.result.textContent = msg.result;
+      if (msg.fuel !== undefined) {
+        els.fuel.textContent = `${msg.fuel.toLocaleString()}${msg.topLevel ? " (top level)" : ` of ${BigInt(els.budget.value).toLocaleString()}`}`;
+      }
+      finishDebugger(msg.aborted ? "stopped" : "finished");
+      break;
+    }
+  }
+}
+
+function selectFrame(i) {
+  if (!dbg) return;
+  // Built-ins have no variables; select the nearest frame of the program.
+  while (i > 0 && dbg.frames[i].kind !== "function") i--;
+  dbg.selected = i;
+  const frame = dbg.frames[i];
+  els.dbgStack.replaceChildren();
+  dbg.frames.forEach((f, j) => {
+    const li = document.createElement("li");
+    li.append(f.kind === "function" ? f.name : `${f.name} (built-in)`);
+    if (f.pos) li.append(span(f.pos.file === OPTIONS.filename ? `line ${f.pos.line}` : `${f.pos.file}:${f.pos.line}`, "where"));
+    if (f.kind !== "function") li.className = "builtin";
+    else li.addEventListener("click", () => selectFrame(j));
+    if (j === i) li.classList.add("sel");
+    els.dbgStack.prepend(li); // innermost first
+  });
+  els.dbgVars.replaceChildren();
+  const section = (title) => {
+    const tr = els.dbgVars.insertRow();
+    tr.className = "section";
+    const td = tr.insertCell();
+    td.colSpan = 2;
+    td.textContent = title;
+  };
+  const rows = (vars) => {
+    for (const v of vars) {
+      const tr = els.dbgVars.insertRow();
+      tr.insertCell().textContent = v.name;
+      const td = tr.insertCell();
+      if (!v.bound) td.append(span("unbound", "unbound"));
+      else {
+        td.textContent = v.value.length > MAX_VALUE ? v.value.slice(0, MAX_VALUE) + "…" : v.value;
+        td.title = v.type;
+      }
+    }
+  };
+  if (frame?.locals.length) {
+    section(`locals of ${frame.name}`);
+    rows(frame.locals);
+  }
+  if (dbg.globals.length) {
+    section("globals");
+    rows(dbg.globals);
+  }
+  stopLine = frame?.pos?.file === OPTIONS.filename ? frame.pos.line : 0;
+  renderGutter();
+  if (stopLine) goTo(stopLine, frame.pos.col);
+}
+
+function setDebugState(text, kind = "") {
+  els.dbgState.textContent = text;
+  els.dbgState.className = "status " + kind;
+  const stopped = !!dbg?.stopped;
+  for (const b of [els.dbgContinue, els.dbgOver, els.dbgInto, els.dbgOut]) b.disabled = !stopped;
+  els.dbgPause.disabled = !dbg || stopped;
+  els.dbgStop.disabled = !dbg;
+}
+
+/** Resumes a stopped program with a command (CONTINUE, STEP_*). */
+function command(cmd) {
+  if (!dbg?.stopped) return;
+  dbg.stopped = false;
+  Atomics.store(dbg.ctrl, CMD, cmd);
+  Atomics.notify(dbg.ctrl, CMD);
+}
+
+function finishDebugger(state) {
+  if (dbg) dbg.worker.terminate();
+  dbg = null;
+  stopLine = 0;
+  stopIsError = false;
+  els.source.readOnly = false;
+  els.dbgStack.replaceChildren();
+  els.dbgVars.replaceChildren();
+  setDebugState(state);
+  renderGutter();
+}
+
+function stopDebugger() {
+  if (dbg) {
+    finishDebugger("stopped");
+    appendOutput("stopped by the debugger\n", "err");
+  }
+  els.debugger.hidden = true;
+}
+
+els.debug.addEventListener("click", debug);
+els.dbgContinue.addEventListener("click", () => command(CONTINUE));
+els.dbgOver.addEventListener("click", () => command(STEP_OVER));
+els.dbgInto.addEventListener("click", () => command(STEP_INTO));
+els.dbgOut.addEventListener("click", () => command(STEP_OUT));
+els.dbgPause.addEventListener("click", () => dbg && Atomics.store(dbg.ctrl, PAUSE, 1));
+els.dbgStop.addEventListener("click", () => {
+  if (!dbg) return;
+  finishDebugger("stopped");
+  appendOutput("stopped by the debugger\n", "err");
+});
+document.addEventListener("keydown", (e) => {
+  const keys = {
+    F5: () => (e.shiftKey ? els.dbgStop.click() : dbg?.stopped ? command(CONTINUE) : !dbg && debug()),
+    F8: () => command(CONTINUE),
+    F10: () => command(STEP_OVER),
+    F11: () => command(e.shiftKey ? STEP_OUT : STEP_INTO),
+  };
+  if (keys[e.key] && compiler) {
+    e.preventDefault();
+    keys[e.key]();
+  }
+});
 
 // ---- downloads ----
 
@@ -420,6 +635,8 @@ try {
   els.version.textContent = `starc ${compiler.version}`;
   els.run.disabled = false;
   els.downloadWasm.disabled = false;
+  els.debug.disabled = false;
+  if (!globalThis.crossOriginIsolated) els.debug.title = "The debugger needs a cross-origin isolated page (see coi.js)";
   run();
 } catch (e) {
   setStatus(`cannot load the compiler: ${e.message}`, "error");
