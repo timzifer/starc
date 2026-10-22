@@ -25,6 +25,12 @@ test("values round-trip", () => {
   assert.ok(Number.isNaN(decode(encode(NaN))));
   assert.deepEqual(decode(encode({ a: 1 })), new Map([["a", 1]]), "objects are dicts");
   assert.deepEqual([...new Struct({ b: 1, a: 2 }).fields.keys()], ["a", "b"]);
+  // Field names are sorted by code point, like their UTF-8 bytes in Go (issue #51).
+  const names = ["\u{10000}", "\ue000", "\uffff", "\ud7ff", "a", "", "\u{10000}a", "\u{10ffff}"];
+  assert.deepEqual([...new Struct(new Map(names.map((k) => [k, 1]))).fields.keys()], ["", "a", "\ud7ff", "\ue000", "\uffff", "\u{10000}", "\u{10000}a", "\u{10ffff}"]);
+  const native = Buffer.from("CQIAAAADAAAA7oCAAwEAAAAAAAAABAAAAPCQgIADAgAAAAAAAAA=", "base64");
+  assert.deepEqual([...decode(native).fields.keys()], ["\ue000", "\u{10000}"]);
+  assert.ok(Buffer.from(encode(decode(native))).equals(native), "a struct from Go re-encodes to the same bytes");
   assert.throws(() => encode(2n ** 63n), RangeError);
   assert.throws(() => encode(() => 1), TypeError);
   assert.throws(() => decode(new Uint8Array([3, 1])), /truncated/);
@@ -73,6 +79,12 @@ test("calls with JavaScript values", async () => {
   assert.equal(printed, "\ufeffhi\n");
   assert.equal(echo.call("echo", "\ufeffhello"), "\ufeffhello");
   assert.deepEqual(echo.call("echo", new Map([["\ufeffk", 1]])), new Map([["\ufeffk", 1]]));
+
+  // A struct result decodes to the field order of the module (issue #51).
+  const st = await load(compiler.compile('def f():\n    return struct(**{"\\ue000": 1, "\\U00010000": 2})\n', { filename: "s.star", struct: true }).wasm);
+  const raw = st.callRaw("f", encodeCall([], {}));
+  assert.ok(Buffer.from(raw).equals(Buffer.from("CQIAAAADAAAA7oCAAwEAAAAAAAAABAAAAPCQgIADAgAAAAAAAAA=", "base64")));
+  assert.ok(Buffer.from(encode(st.call("f"))).equals(Buffer.from(raw)));
 
   const res = compiler.compile("x = (", { filename: "e.star" });
   assert.equal(res.wasm, null);

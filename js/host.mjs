@@ -21,10 +21,21 @@ export class Struct {
   /** @param {Record<string, any> | Map<string, any>} fields */
   constructor(fields = {}) {
     const entries = fields instanceof Map ? [...fields] : Object.entries(fields);
-    entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    entries.sort((a, b) => compareStrings(a[0], b[0]));
     /** @type {Map<string, any>} */
     this.fields = new Map(entries);
   }
+}
+
+// compareStrings orders strings by code point, which is the order of their
+// UTF-8 bytes that Go and the modules use. The UTF-16 order of < differs
+// for code points above U+FFFF, which sort before U+E000..U+FFFF in it.
+function compareStrings(a, b) {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    if (a.charCodeAt(i) !== b.charCodeAt(i)) return a.codePointAt(i) - b.codePointAt(i);
+  }
+  return a.length - b.length;
 }
 
 /** An opaque host value (see docs/language.md). */
