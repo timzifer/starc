@@ -286,7 +286,7 @@ func (r *RT) registerStr() {
 			If(and(eq(get(t), c32(TDict)), ne(and(I32Load8U(get(v), offFlags), c32(flagRepr)), c32(0))), Return(r.S("{...}"))),
 			Set(parts, r.Call("list_new", c32(8))),
 			If(or(eq(get(t), c32(TList)), eq(get(t), c32(TTuple))), Seq{
-				If(eq(get(t), c32(TList)), I32Store8(get(v), offFlags, or(I32Load8U(get(v), offFlags), c32(flagRepr)))),
+				If(eq(get(t), c32(TList)), r.reprMark(get(v))),
 				push(IfV(I32, eq(get(t), c32(TList)), r.S("["), r.S("("))),
 				Set(n, ld(get(v), 4)),
 				Set(base, r.Call("seq_base", get(v))),
@@ -296,11 +296,11 @@ func (r *RT) registerStr() {
 				),
 				If(and(eq(get(t), c32(TTuple)), eq(get(n), c32(1))), push(r.S(","))),
 				push(IfV(I32, eq(get(t), c32(TList)), r.S("]"), r.S(")"))),
-				If(eq(get(t), c32(TList)), I32Store8(get(v), offFlags, and(I32Load8U(get(v), offFlags), c32(^flagRepr)))),
+				If(eq(get(t), c32(TList)), r.reprUnmark(get(v))),
 				Return(r.Call("str_join", r.S(""), get(parts))),
 			}),
 			If(eq(get(t), c32(TDict)), Seq{
-				I32Store8(get(v), offFlags, or(I32Load8U(get(v), offFlags), c32(flagRepr))),
+				r.reprMark(get(v)),
 				push(r.S("{")),
 				r.forRange(i, c32(0), ld(get(v), offDictUsed),
 					Set(ent, add(ld(get(v), offDictEntries), mul(get(i), c32(12)))),
@@ -313,7 +313,7 @@ func (r *RT) registerStr() {
 					}),
 				),
 				push(r.S("}")),
-				I32Store8(get(v), offFlags, and(I32Load8U(get(v), offFlags), c32(^flagRepr))),
+				r.reprUnmark(get(v)),
 				Return(r.Call("str_join", r.S(""), get(parts))),
 			}),
 			If(eq(get(t), c32(TFunction)),
@@ -509,3 +509,50 @@ var (
 	posInf = inf(1)
 	negInf = inf(-1)
 )
+
+// repr marks a list or dict while it prints it, to detect cycles. The
+// marked values are also kept on a stack, so that an error that aborts
+// repr (such as a too deeply nested value) can clear the marks, which
+// would otherwise make a later repr print the values as cycles.
+
+// reprMark yields code that marks the list or dict v.
+func (r *RT) reprMark(v Expr) Expr {
+	return Seq{
+		I32Store8(v, offFlags, or(I32Load8U(v, offFlags), c32(flagRepr))),
+		st(GGet(r.ReprTop), 0, v),
+		GSet(r.ReprTop, add(GGet(r.ReprTop), c32(4))),
+	}
+}
+
+// reprUnmark yields code that removes the mark of v, the last one made.
+func (r *RT) reprUnmark(v Expr) Expr {
+	return Seq{
+		I32Store8(v, offFlags, and(I32Load8U(v, offFlags), c32(^flagRepr))),
+		GSet(r.ReprTop, sub(GGet(r.ReprTop), c32(4))),
+	}
+}
+
+// reprUnwind yields code that clears all marks, for an error; it neither
+// allocates nor charges fuel.
+func (r *RT) reprUnwind() Expr {
+	brk, top := NewLabel(), NewLabel()
+	return Block(brk, Loop(top,
+		BrIf(brk, I32LeU(GGet(r.ReprTop), GGet(r.ReprBase))),
+		GSet(r.ReprTop, sub(GGet(r.ReprTop), c32(4))),
+		I32Store8(ld(GGet(r.ReprTop), 0), offFlags, and(I32Load8U(ld(GGet(r.ReprTop), 0), offFlags), c32(^flagRepr))),
+		Br(top),
+	))
+}
+
+// initReprMarks yields code that allocates the stack of marks if the
+// module uses repr: repr counts toward the call depth, so its nesting
+// is bounded by the depth limit.
+func (r *RT) initReprMarks() Expr {
+	if _, ok := r.funcs["repr"]; !ok {
+		return Nop()
+	}
+	return Seq{
+		GSet(r.ReprBase, r.Call("alloc_free", c32(4*(r.Cfg.MaxCallDepth+2)))),
+		GSet(r.ReprTop, GGet(r.ReprBase)),
+	}
+}

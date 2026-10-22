@@ -181,6 +181,8 @@ type RT struct {
 	CurEnd   *Global // end of the buffer being decoded
 	IntCache *Global // table of preallocated small ints, or 0
 	HeapMax  *Global // high-water mark of the heap
+	ReprBase *Global // stack of the values that repr marks (see reprMark)
+	ReprTop  *Global
 	CmpDepth *Global // nesting depth of the current comparison
 	Fuel     *Global // remaining fuel (i64), with Config.Fuel
 	ErrCode  *Global // code of the last error (ErrStarlark, ErrFuel, ...)
@@ -256,6 +258,8 @@ func New(m *Module, cfg Config) *RT {
 	r.CurEnd = m.AddGlobal(&Global{Name: "cursor_end", Type: I32, Mutable: true})
 	r.IntCache = m.AddGlobal(&Global{Name: "int_cache", Type: I32, Mutable: true})
 	r.HeapMax = m.AddGlobal(&Global{Name: "heap_max", Type: I32, Mutable: true})
+	r.ReprBase = m.AddGlobal(&Global{Name: "repr_marks", Type: I32, Mutable: true})
+	r.ReprTop = m.AddGlobal(&Global{Name: "repr_marks_top", Type: I32, Mutable: true})
 	r.CmpDepth = m.AddGlobal(&Global{Name: "cmp_depth", Type: I32, Mutable: true})
 
 	r.None = m.Static(8, 8)
@@ -347,6 +351,7 @@ func (r *RT) Finish() *Func {
 	}
 	f.Add(r.methodInit...)
 	f.Add(r.initFrames())
+	f.Add(r.initReprMarks())
 	r.layoutPositions()
 	r.layoutProfile()
 	end := (r.M.DataEnd() + 7) &^ 7
@@ -625,6 +630,7 @@ func (r *RT) registerCore() {
 		f.Add(
 			GSet(r.CmpDepth, c32(0)),
 			GSet(r.Depth, c32(0)),
+			r.reprUnwind(),
 			If(eqz(GGet(r.ErrCode)), GSet(r.ErrCode, c32(ErrStarlark))),
 		)
 		if r.Cfg.Command {

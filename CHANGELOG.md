@@ -128,6 +128,10 @@ and the project follows [Semantic Versioning](https://semver.org/).
   valid UTF-8 as U+FFFD, as in go.starlark.net; before, `codepoints()`
   grouped them by their leading byte and `codepoint_ords()` and `ord`
   failed.
+* An error that aborts `repr`, such as a value nested beyond the call
+  depth limit, no longer leaves the lists and dicts it was printing
+  marked, which made a later `repr` of them in the same module print
+  `[...]` or `{...}` as if they contained themselves.
 
 ## [0.1.1] - 2026-10-20
 
