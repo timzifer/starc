@@ -310,9 +310,13 @@ func (r *RT) callFrame(f *Func, call Expr, cb bool) Expr {
 		// kwargs_merge, within its own frame (functions do so in bind).
 		If(and(ne(get(kw), c32(0)), ne(GGet(r.DupKw), c32(0))), If(isTag(get(fn), TBuiltin),
 			r.Fail(ld(get(fn), offBiName), ": got multiple values for keyword argument ", r.Call("take_dup_kw")))),
-		Set(res, call),
+		Set(res, r.profCall(f, call, cb)),
 		GSet(r.SP, get(sp)),
 		GSet(r.CurPos, ld(get(sp), 4)),
 		Return(get(res)),
 	}
 }
+
+// Positions returns the source positions (line, col) by position id,
+// starting with id 1.
+func (r *RT) Positions() [][2]int { return r.posList }

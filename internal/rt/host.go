@@ -1,6 +1,8 @@
 package rt
 
 import (
+	"encoding/binary"
+
 	. "github.com/timzifer/starc/internal/wasm"
 )
 
@@ -64,7 +66,11 @@ func (r *RT) HostBuiltin(name string, cost int64) uint32 {
 	if i := lastDot(name); i >= 0 {
 		display = name[i+1:]
 	}
-	return r.Builtin(display, f)
+	a := r.Builtin(display, f)
+	if r.Cfg.Profile {
+		r.profEntries[binary.LittleEndian.Uint32(r.M.StaticSlice(a+offBiProf, 4))-1] = ProfileEntry{Name: name, Kind: ProfHost}
+	}
+	return a
 }
 
 // HostFuncs lists the host functions imported by the module.

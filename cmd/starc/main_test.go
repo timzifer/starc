@@ -111,3 +111,19 @@ func TestFuelFlags(t *testing.T) {
 		t.Errorf("negative budget: code %d", code)
 	}
 }
+
+func TestProfile(t *testing.T) {
+	code, stdout, stderr := cli(t, "", "run", "-profile", "../../examples/fib.star", "fib", "15")
+	if code != 0 || stdout != "fib(30) = 832040\n610\n" {
+		t.Fatalf("code %d stdout %q stderr %q", code, stdout, stderr)
+	}
+	lines := strings.Split(strings.TrimSpace(stderr), "\n")
+	if len(lines) < 3 || !strings.HasPrefix(lines[0], "fuel used: ") || !strings.HasPrefix(lines[1], "fuel") ||
+		!strings.Contains(lines[2], "fib  ../../examples/fib.star:") {
+		t.Errorf("profile:\n%s", stderr)
+	}
+	// Without a function, the profile covers the top-level code.
+	if code, _, stderr := cli(t, "print(len('ab'))", "run", "-profile", "-"); code != 0 || !strings.Contains(stderr, "<toplevel>") {
+		t.Errorf("top level: code %d stderr %q", code, stderr)
+	}
+}

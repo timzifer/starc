@@ -54,14 +54,16 @@ rejects such a module if it imports anything from WASI.
 | `starc_frame_pos` | `(i: i32) -> i64` | position of frame `i`: line in the low, column in the high 32 bits; -1 for a built-in |
 | `starc_fuel_set` | `(n: i64) -> ()` | sets the remaining fuel budget (only with fuel metering, see [fuel.md](fuel.md)) |
 | `starc_fuel` | `() -> i64` | returns the remaining fuel budget (only with fuel metering) |
+| `starc_profile`, … | | the fuel profile (only with `Options.Profile`, see [debug.md](debug.md)) |
 | *function* | `(ptr: i32, len: i32) -> i64` | one export per exported top-level `def` |
 
 By default every top-level `def` whose name does not start with `_` is
 exported under its own name; `Options.Exports` / `-export` selects a
 subset. The names `memory`, `_initialize`, `_start`, `starc_alloc`,
 `starc_error`, `starc_error_code`, `starc_frames`, `starc_frame`,
-`starc_frame_pos`, `starc_fuel_set` and `starc_fuel` are reserved. The
-three frame functions are missing in modules built with
+`starc_frame_pos`, `starc_fuel_set`, `starc_fuel`, `starc_profile`,
+`starc_profile_fuel`, `starc_profile_calls` and `starc_profile_reset`
+are reserved. The three frame functions are missing in modules built with
 `Options.NoBacktrace` (`-no-backtrace`).
 
 ### Command
@@ -259,6 +261,10 @@ there are none; `no_wasi` is omitted for modules that may import WASI.
 [limits](#limits); the size limits are omitted when unlimited. `file` is
 the name of the source file in [backtraces](#backtraces) and is omitted
 for a module built without them.
+
+Modules built with a profile also contain the section `starc.debug`,
+which maps functions and positions to the source (see
+[debug.md](debug.md#debug-information)).
 
 ## Example: JavaScript host
 

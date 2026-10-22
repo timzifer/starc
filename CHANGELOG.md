@@ -8,6 +8,14 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+* Fuel profile: `Options.Profile` (`-profile`) records the fuel that
+  each function of the program, built-in and host function uses, without
+  changing the fuel consumption. `host.Module.Profile` and
+  `ResetProfile` read and clear it, `starc run -profile` prints it.
+  Profiled modules contain the custom section `starc.debug`, which maps
+  functions and position ids to the source (`host.Module.DebugInfo`),
+  and export `starc_profile`, `starc_profile_fuel`,
+  `starc_profile_calls` and `starc_profile_reset`. See docs/debug.md.
 * Backtraces: run-time errors report the position of the failing
   operation and the call stack, with the positions and frames of
   go.starlark.net (built-ins such as `sorted` appear as `<builtin>`).

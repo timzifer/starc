@@ -101,6 +101,10 @@ type Options struct {
 	// operation that can fail and a few instructions per call. Errors
 	// then carry only their message.
 	NoBacktrace bool
+	// Profile records the fuel that each function uses (see docs/debug.md),
+	// which host.Module.Profile reads. It requires Fuel and backtraces;
+	// a profiled module uses exactly the same fuel as one without.
+	Profile bool
 }
 
 // maxCallDepth bounds Options.MaxCallDepth; no engine supports deeper
@@ -195,6 +199,7 @@ func Compile(filename string, src []byte, opts *Options) ([]byte, error) {
 		FiniteFloats:   opts.FiniteFloats,
 		Struct:         opts.Struct,
 		NoBacktrace:    opts.NoBacktrace,
+		Profile:        opts.Profile,
 		Dialect: syntax.FileOptions{
 			While:           opts.Dialect.While,
 			TopLevelControl: opts.Dialect.TopLevelControl,

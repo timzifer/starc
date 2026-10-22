@@ -73,8 +73,9 @@ func newRuntime(t testing.TB, cfg wazero.RuntimeConfig) wazero.Runtime {
 }
 
 // execute compiles src and runs it as a WASI command, with a deadline.
+// With fuel, the program is also profiled, which must not change its behavior.
 func execute(t *testing.T, rt wazero.Runtime, name, src string, fuel bool) (string, string, error) {
-	bin, err := Compile(name, []byte(src), Options{Command: true, Names: true, Dialect: testDialect, Fuel: fuel, Struct: true})
+	bin, err := Compile(name, []byte(src), Options{Command: true, Names: true, Dialect: testDialect, Fuel: fuel, Profile: fuel, Struct: true})
 	if err != nil {
 		t.Fatalf("%s: compile: %v", name, err)
 	}
