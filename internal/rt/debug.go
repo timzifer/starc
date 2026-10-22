@@ -28,10 +28,17 @@ import (
 
 // Debug modes.
 const (
-	DbgOff     = 0
-	DbgBreak   = 1  // stop at breakpoints
-	DbgStep    = 2  // stop at every statement
-	offSpecDbg = 32 // debug descriptor of a spec
+	DbgOff    = 0
+	DbgBreak  = 1 // stop at breakpoints
+	DbgStep   = 2 // stop at every statement
+	DbgErrors = 4 // flag: also stop at errors, before the call ends
+
+	// DbgErrorStop marks the argument of the import starc_dbg for a stop
+	// at an error; the rest is the position id of the failing operation.
+	DbgErrorStop = -1 << 31
+
+	dbgStopMask = 3  // the stop mode in DbgMode
+	offSpecDbg  = 32 // debug descriptor of a spec
 )
 
 func (r *RT) initDebug() {
@@ -48,6 +55,15 @@ func (r *RT) initDebug() {
 	// dbg_stmt(pos): stops at the statement at pos if requested.
 	r.define("dbg_stmt", p1, r0, func(f *Func) {
 		pos := f.Param(0)
+		f.Add(
+			If(and(ne(and(GGet(r.DbgMode), c32(dbgStopMask)), c32(DbgStep)), eqz(I32Load8U(r.dbgBreak(get(pos)), 0))), Return(nil)),
+			r.Call("dbg_stop", get(pos)),
+		)
+	})
+	// dbg_stop(arg): stops at position id arg (with DbgErrorStop set for an
+	// error), calling the host and restoring the state afterwards.
+	r.define("dbg_stop", p1, r0, func(f *Func) {
+		arg := f.Param(0)
 		fuel := f.Local(I64)
 		heap, heapMax, depth, errObj, errCode, curPos := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32),
 			f.Local(I32), f.Local(I32)
@@ -70,10 +86,9 @@ func (r *RT) initDebug() {
 			restore = append(restore, GSet(r.Fuel, get(fuel)))
 		}
 		f.Add(
-			If(and(ne(GGet(r.DbgMode), c32(DbgStep)), eqz(I32Load8U(r.dbgBreak(get(pos)), 0))), Return(nil)),
 			Seq(save),
-			GSet(r.DbgPos, get(pos)),
-			Call(r.dbgImport, get(pos)),
+			GSet(r.DbgPos, and(get(arg), c32(^DbgErrorStop))),
+			Call(r.dbgImport, get(arg)),
 			Seq(restore),
 		)
 	})

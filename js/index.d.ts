@@ -87,6 +87,12 @@ export interface Config {
   host?: Record<string, HostFunc>;
   /** Fuel budget of the top-level code; 0 or absent is unlimited. */
   initFuel?: number | bigint;
+  /**
+   * Stops a module built with the debug option: at every statement (step),
+   * at the statements on lines of the main file, and at errors before the
+   * call ends (errors). stop runs synchronously during the stop.
+   */
+  debug?: { step?: boolean; lines?: number[]; errors?: boolean; stop: (s: Stop) => void };
 }
 
 export interface Meta {
@@ -123,6 +129,35 @@ export class Module {
   resetProfile(): void;
 }
 
+/** A variable at a stop. */
+export interface Variable {
+  name: string;
+  bound: boolean;
+  type: string;
+  /** The value formatted with repr, or "<error: message>". */
+  value: string;
+}
+
+/** A frame of the call stack at a stop. */
+export interface DebugFrame {
+  name: string;
+  kind: "function" | "builtin" | "prelude";
+  pos: Position | null;
+  locals: Variable[];
+}
+
+/** A module stopped at a statement or an error; valid only during the stop. */
+export class Stop {
+  readonly pos: Position;
+  /** The error message at a stop at an error, "" at a statement. */
+  readonly err: string;
+  /** The number of frames, counting built-ins. */
+  readonly depth: number;
+  stack(): DebugFrame[];
+  globals(): Variable[];
+  setStep(on: boolean): void;
+}
+
 /** Instantiates a starc module and runs its top-level code. */
 export function load(wasm: BufferSource | WebAssembly.Module, config?: Config): Promise<Module>;
 export function readMeta(wasm: BufferSource | WebAssembly.Module): Meta;
@@ -145,6 +180,8 @@ export interface CompileOptions {
   finiteFloats?: boolean;
   struct?: boolean;
   noBacktrace?: boolean;
+  /** A debug build (see Config.debug). */
+  debug?: boolean;
   dialect?: { while?: boolean; topLevelControl?: boolean; globalReassign?: boolean; recursion?: boolean; set?: boolean };
   /** Sources of the modules that load statements name. */
   files?: Record<string, string>;

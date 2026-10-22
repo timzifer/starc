@@ -8,6 +8,10 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+* Debuggers stop at run-time errors too, before the call ends
+  (`host.Debugger.Errors`, `Stop.Err`), with the stack and variables at
+  the error; `js/host.mjs` gets the debugger of the Go host (`debug` in
+  `load`, `Stop`), checked stop by stop against it.
 * JavaScript: the compiler builds as WebAssembly (`cmd/starc-js`,
   `js/compiler.mjs`) and compiles programs in the browser or Node.js,
   with errors positioned for editor markers; `js/host.mjs` runs modules

@@ -129,8 +129,29 @@ formats them as go.starlark.net does.
 
 **Profiles** of modules built with `profile: true` are read with
 `m.profile()` and cleared with `m.resetProfile()` (see
-[debug.md](debug.md)). Debug builds load, but stopping them needs a
-debugger, which only the Go host has so far.
+[debug.md](debug.md)).
+
+**Debugging** works as with the Go host: build with `debug: true` and
+pass `debug` to `load`:
+
+```js
+const m = await load(wasm, {
+  debug: {
+    lines: [12], // breakpoints in the main file; or step: true
+    errors: true, // also stop at run-time errors
+    stop(s) {
+      console.log(s.pos.toString(), s.err);
+      for (const f of s.stack()) console.log(f.name, f.pos?.toString(), f.locals);
+      console.log(s.globals());
+    },
+  },
+});
+```
+
+The callback runs synchronously while the module is stopped. To pause a
+program interactively, run it in a Web Worker and block there (see the
+playground). The parity test also compares every stop, with its stack and
+variables, with the Go debugger.
 
 ## Same results as the server
 

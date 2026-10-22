@@ -42,6 +42,17 @@ const host = {
   "ctx.name": (_args, kwargs) => (kwargs?.get("upper") === true ? "STARC" : "starc"),
 };
 
+const vars = (vs) => vs.map(({ name, bound, type, value }) => ({ name, bound, type, value }));
+
+function recordStop(s) {
+  return {
+    pos: s.pos.toString(),
+    err: s.err,
+    frames: s.stack().map((f) => ({ name: f.name, kind: f.kind, pos: f.pos ? f.pos.toString() : "", locals: vars(f.locals) })),
+    globals: vars(s.globals()),
+  };
+}
+
 function errorResult(e) {
   if (e instanceof ExitError) return { msg: "", code: 0, backtrace: "", exitCode: e.code };
   if (e instanceof StarlarkError) return { msg: e.message, code: e.code, backtrace: e.backtrace() };
@@ -61,8 +72,11 @@ for (const c of fixtures.cases) {
     let stdout = "";
     let stderr = "";
     let m;
+    // Debug cases record every stop, as internal/cmd/jsfixtures does.
+    const stops = [];
+    const debug = c.stops ? { step: true, errors: true, stop: (s) => stops.push(recordStop(s)) } : undefined;
     try {
-      m = await load(wasm, { stdout: (s) => (stdout += s), stderr: (s) => (stderr += s), host, initFuel: c.initFuel });
+      m = await load(wasm, { stdout: (s) => (stdout += s), stderr: (s) => (stderr += s), host, initFuel: c.initFuel, debug });
     } catch (e) {
       assert.deepEqual(errorResult(e), c.initError, "init error");
       assert.equal(stdout, c.initStdout, "init stdout");
@@ -88,6 +102,7 @@ for (const c of fixtures.cases) {
       got.stdout = stdout;
       assert.deepEqual(got, cl, `call ${cl.fn}`);
     }
+    if (c.stops) assert.deepEqual(stops, c.stops, "debugger stops");
     if (c.profile) {
       const prof = m.profile().map((p) => ({ name: p.name, fuel: Number(p.fuel), calls: Number(p.calls) }));
       assert.deepEqual(prof, c.profile, "profile");

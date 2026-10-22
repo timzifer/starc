@@ -387,6 +387,108 @@ class ExitSignal {
 // ---- modules ----
 
 const COL_BITS = 20;
+const ERROR_STOP = 0x80000000; // rt.DbgErrorStop
+
+function debugMode(step, errors) {
+  return (step ? 2 : 1) | (errors ? 4 : 0); // rt.DbgStep, rt.DbgBreak, rt.DbgErrors
+}
+
+/**
+ * A module built with the debug option, stopped at a statement or at an
+ * error (config.debug). It is valid only during the stop callback. As in
+ * the Go host, a stop changes neither the results nor the fuel.
+ */
+export class Stop {
+  constructor(m, arg, errors) {
+    this._m = m;
+    this._errors = errors;
+    const ex = m._exports;
+    /** The message of the error at a stop at an error, "" at a statement. */
+    this.err = "";
+    if (arg & ERROR_STOP) {
+      arg &= ~ERROR_STOP;
+      this.err = this._str("starc_dbg_error");
+    }
+    const info = m.debugInfo;
+    const p = info.positions[arg] ?? [0, 0, 0];
+    /** The statement, or the failing operation. @type {Position} */
+    this.pos = new Position(info.files?.[p[2]] ?? info.file, p[0], p[1]);
+    /** The number of frames, counting built-ins: a measure for stepping over and out. */
+    this.depth = ex.starc_dbg_frames();
+  }
+
+  _call(name, ...args) {
+    const f = this._m._exports[name];
+    if (typeof f !== "function") throw new Error(`starc: module lacks ${name} (not a debug build?)`);
+    return f(...args);
+  }
+
+  _str(name, ...args) {
+    const packed = this._call(name, ...args);
+    return packed === 0n ? "" : decoder.decode(this._m._read(packed));
+  }
+
+  _variable(name, handle) {
+    if (handle === 0) return { name, bound: false, type: "", value: "" };
+    let type = "";
+    let value;
+    try {
+      type = this._str("starc_dbg_type", handle);
+      value = this._str("starc_dbg_value", handle);
+    } catch (e) {
+      // A value that cannot be formatted, such as a too deeply nested one.
+      value = `<error: ${this._str("starc_dbg_error") || (e instanceof Error ? e.message : String(e))}>`;
+    }
+    return { name, bound: true, type, value };
+  }
+
+  /**
+   * The call stack, outermost first: name, kind ("function" for a function
+   * of the program or its top level, "builtin" or "prelude"), position and,
+   * for functions of the program, the local variables as at the start of
+   * the frame's current statement.
+   * @returns {{name: string, kind: string, pos: Position | null, locals: {name: string, bound: boolean, type: string, value: string}[]}[]}
+   */
+  stack() {
+    const info = this._m.debugInfo;
+    const n = this._call("starc_dbg_frames");
+    const frames = [];
+    let prev = 0;
+    for (let i = 0; i < n; i++) {
+      const kind = this._call("starc_dbg_frame_kind", i);
+      // As in backtraces, internal prelude helpers (kind 3) and what the
+      // prelude calls for itself are hidden.
+      const hidden = kind === 3 || (kind === 1 && prev >= 2);
+      prev = kind;
+      if (hidden) continue;
+      const fr = { name: this._str("starc_dbg_frame", i), kind: ["function", "builtin", "prelude"][Math.min(Math.max(kind, 0), 2)], pos: null, locals: [] };
+      if (kind === 0) {
+        const p = BigInt.asUintN(64, this._call("starc_dbg_frame_pos", i));
+        const hi = Number(p >> 32n);
+        fr.pos = new Position(info.files?.[hi >>> COL_BITS] ?? info.file, Number(p & 0xffffffffn), hi & ((1 << COL_BITS) - 1));
+      }
+      const nl = this._call("starc_dbg_locals", i);
+      for (let j = 0; j < nl; j++) {
+        fr.locals.push(this._variable(this._str("starc_dbg_local_name", i, j), this._call("starc_dbg_local", i, j)));
+      }
+      frames.push(fr);
+    }
+    return frames;
+  }
+
+  /** The global variables of the main file. */
+  globals() {
+    const n = this._call("starc_dbg_globals");
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(this._variable(this._str("starc_dbg_global_name", i), this._call("starc_dbg_global", i)));
+    return out;
+  }
+
+  /** Stops at every statement (on) or at breakpoints only (off). */
+  setStep(on) {
+    this._call("starc_dbg_mode", debugMode(on, this._errors));
+  }
+}
 
 function section(mod, name) {
   const s = WebAssembly.Module.customSections(mod, name);
@@ -414,6 +516,7 @@ export function readMeta(wasm) {
  *   stderr?: (text: string) => void,
  *   host?: Record<string, (args: any[], kwargs: Map<string, any> | null, call: {chargeFuel(n: number | bigint): void}) => any>,
  *   initFuel?: number | bigint,
+ *   debug?: {step?: boolean, lines?: number[], errors?: boolean, stop: (s: Stop) => void},
  * }} [config]
  */
 export async function load(wasm, config = {}) {
@@ -490,7 +593,7 @@ export class Module {
         } else if (imp.name === "starc_print") {
           imports.starc_host.starc_print = (ptr, n) => out(decoder.decode(read(ptr, n)));
         } else if (imp.name === "starc_dbg") {
-          imports.starc_host.starc_dbg = () => {}; // debug builds: no debugger attached
+          imports.starc_host.starc_dbg = (arg) => this._debugStop(arg);
         } else {
           const fn = host[imp.name];
           if (typeof fn !== "function") {
@@ -504,6 +607,7 @@ export class Module {
     }
     const inst = await WebAssembly.instantiate(this._mod, imports);
     this._exports = inst.exports;
+    this._startDebugger();
     if (cfg.initFuel !== undefined && cfg.initFuel !== 0) this.setFuel(cfg.initFuel);
     if (this.meta.model !== "reactor") {
       try {
@@ -522,6 +626,30 @@ export class Module {
     } catch (e) {
       throw this._error(e);
     }
+  }
+
+  // ---- debugger (debug builds, see Stop) ----
+
+  _startDebugger() {
+    const d = this._config.debug;
+    if (!d) return;
+    const ex = this._exports;
+    if (!ex.starc_dbg_mode || !this.debugInfo) {
+      throw new Error("starc: config.debug requires a module built with the debug option");
+    }
+    const lines = new Set(d.lines ?? []);
+    const info = this.debugInfo;
+    for (const id of info.statements ?? []) {
+      const p = info.positions[id];
+      if (p && (p[2] ?? 0) === 0 && lines.has(p[0])) ex.starc_dbg_break(id, 1);
+    }
+    ex.starc_dbg_mode(debugMode(!!d.step, !!d.errors));
+  }
+
+  _debugStop(arg) {
+    const d = this._config.debug;
+    if (!d || typeof d.stop !== "function" || !this.debugInfo) return;
+    d.stop(new Stop(this, arg >>> 0, !!d.errors));
   }
 
   _hostCall(name, fn, input) {

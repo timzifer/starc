@@ -17,17 +17,25 @@ type Debugger struct {
 	Step bool
 	// Lines stops at the statements that start on these lines.
 	Lines []int
+	// Errors also stops at a run-time error, before the call ends, so
+	// that the stack and variables at the error can be inspected; Stop.Err
+	// is then the message.
+	Errors bool
 	// Stop is called at each stop, on the goroutine that runs the
 	// module. The Stop is valid only during the call.
 	Stop func(ctx context.Context, s *Stop)
 }
 
-// Stop is a module stopped at a statement.
+// Stop is a module stopped at a statement or at an error.
 type Stop struct {
-	// Pos is the position of the statement.
+	// Pos is the position of the statement, or of the failing operation.
 	Pos Position
-	mod api.Module
-	dbg *DebugInfo
+	// Err is the message of the error at a stop at an error, and empty at
+	// a statement.
+	Err    string
+	mod    api.Module
+	dbg    *DebugInfo
+	errors bool
 }
 
 // DebugFrame is a frame of the call stack at a stop.
@@ -132,7 +140,7 @@ func (s *Stop) Globals(ctx context.Context) ([]Variable, error) {
 // SetStep turns stopping at every statement on or off; with it off, the
 // module stops at the breakpoints only.
 func (s *Stop) SetStep(ctx context.Context, on bool) error {
-	_, err := s.call(ctx, "starc_dbg_mode", uint64(debugMode(on)))
+	_, err := s.call(ctx, "starc_dbg_mode", uint64(debugMode(on, s.errors)))
 	return err
 }
 
@@ -190,12 +198,20 @@ func (s *Stop) str(ctx context.Context, name string, args ...uint64) (string, er
 	return string(b), nil
 }
 
-func debugMode(step bool) int {
+// debugMode returns the mode of a debug build (see rt.DbgMode).
+func debugMode(step, errors bool) int {
+	mode := 1 // rt.DbgBreak
 	if step {
-		return 2 // rt.DbgStep
+		mode = 2 // rt.DbgStep
 	}
-	return 1 // rt.DbgBreak
+	if errors {
+		mode |= 4 // rt.DbgErrors
+	}
+	return mode
 }
+
+// errorStop marks the argument of starc_dbg at an error (rt.DbgErrorStop).
+const errorStop = 1 << 31
 
 // stopFunc implements the import starc_dbg(pos).
 func stopFunc(d *Debugger, info *DebugInfo) api.GoModuleFunc {
@@ -203,8 +219,13 @@ func stopFunc(d *Debugger, info *DebugInfo) api.GoModuleFunc {
 		if d == nil || d.Stop == nil || info == nil {
 			return
 		}
-		s := &Stop{mod: mod, dbg: info}
-		if id := int(api.DecodeU32(stack[0])); id < len(info.Positions) {
+		s := &Stop{mod: mod, dbg: info, errors: d.Errors}
+		arg := api.DecodeU32(stack[0])
+		if arg&errorStop != 0 {
+			arg &^= errorStop
+			s.Err, _ = s.str(ctx, "starc_dbg_error")
+		}
+		if id := int(arg); id < len(info.Positions) {
 			p := info.Positions[id]
 			s.Pos = Position{Filename: fileName(info.Files, info.File, p[2]), Line: p[0], Col: p[1]}
 		}
@@ -232,6 +253,6 @@ func (m *Module) startDebugger(ctx context.Context, d *Debugger) error {
 			}
 		}
 	}
-	_, err := mode.Call(ctx, uint64(debugMode(d.Step)))
+	_, err := mode.Call(ctx, uint64(debugMode(d.Step, d.Errors)))
 	return err
 }
