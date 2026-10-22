@@ -21,6 +21,7 @@ type Options struct {
 	NoWASI         bool              `json:"noWasi"`
 	Fuel           bool              `json:"fuel"`
 	Profile        bool              `json:"profile"`
+	Debug          bool              `json:"debug"`
 	MaxMemoryPages uint32            `json:"maxMemoryPages"`
 	MaxCallDepth   int               `json:"maxCallDepth"`
 	MaxInputBytes  uint32            `json:"maxInputBytes"`
@@ -67,7 +68,7 @@ func Compile(src string, optsJSON string) ([]byte, []Error) {
 	if o.Filename == "" {
 		o.Filename = "main.star"
 	}
-	opts := &starc.Options{Exports: o.Exports, NoNames: o.NoNames, NoWASI: o.NoWASI, Fuel: o.Fuel, Profile: o.Profile,
+	opts := &starc.Options{Exports: o.Exports, NoNames: o.NoNames, NoWASI: o.NoWASI, Fuel: o.Fuel, Profile: o.Profile, Debug: o.Debug,
 		MaxMemoryPages: o.MaxMemoryPages, MaxCallDepth: o.MaxCallDepth, MaxInputBytes: o.MaxInputBytes,
 		MaxResultBytes: o.MaxResultBytes, FiniteFloats: o.FiniteFloats, Struct: o.Struct, NoBacktrace: o.NoBacktrace,
 		Dialect: starc.Dialect{While: o.Dialect.While, TopLevelControl: o.Dialect.TopLevelControl,

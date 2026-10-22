@@ -43,6 +43,7 @@ type testCase struct {
 	Options  jsapi.Options
 	InitFuel int64 // 0: budget
 	Calls    []call
+	Debug    bool // record every stop of a debugger (Step and Errors)
 }
 
 // The host functions of the cases; js/test/parity.test.mjs implements the
@@ -142,6 +143,24 @@ x = {"a": 1}["b"]
 `},
 	{Name: "init_fuel", Options: jsapi.Options{Command: true, Fuel: true, Dialect: jsapi.Dialect{TopLevelControl: true}},
 		InitFuel: 300, Src: "for i in range(1000):\n    print(i)\n"},
+	{Name: "debug", Options: jsapi.Options{Fuel: true, Debug: true, Struct: true}, Debug: true, Src: `
+LIMIT = 2
+
+def scale(xs, k):
+    out = []
+    for x in xs:
+        out.append(x * k)
+    return out
+
+def run(n):
+    base = [i for i in range(n)]
+    bump = lambda v: v + LIMIT
+    return sorted(scale(base, 3), key = bump)
+
+def broken(d):
+    s = struct(d = d)
+    return s.d["missing"]
+`, Calls: []call{{Fn: "run", Args: []any{int64(3)}}, {Fn: "broken", Args: []any{abi.NewDict("a", int64(1))}}}},
 	{Name: "compile_error", Options: jsapi.Options{Files: map[string]string{"m.star": "x = (\n"}}, Src: `
 load("m.star", "x")
 y = undefined_name
@@ -184,6 +203,7 @@ type fixture struct {
 	InitFuelUsed  int64          `json:"initFuelUsed"`
 	Calls         []callResult   `json:"calls"`
 	Profile       []profileEntry `json:"profile,omitempty"`
+	Stops         []stopRecord   `json:"stops,omitempty"`
 }
 
 func toError(err error) *errorResult {
@@ -226,7 +246,13 @@ func run(c testCase) (fixture, error) {
 	sum := sha256.Sum256(wasm)
 	f.WasmSHA256 = hex.EncodeToString(sum[:])
 	var out, errb bytes.Buffer
-	m, err := host.Load(ctx, wasm, &host.Config{Stdout: &out, Stderr: &errb, InitFuel: f.InitFuel, Funcs: funcs})
+	cfg := &host.Config{Stdout: &out, Stderr: &errb, InitFuel: f.InitFuel, Funcs: funcs}
+	if c.Debug {
+		cfg.Debug = &host.Debugger{Step: true, Errors: true, Stop: func(ctx context.Context, s *host.Stop) {
+			f.Stops = append(f.Stops, recordStop(ctx, s))
+		}}
+	}
+	m, err := host.Load(ctx, wasm, cfg)
 	f.InitStdout, f.InitStderr = out.String(), errb.String()
 	if err != nil {
 		f.InitError = toError(err)
@@ -298,4 +324,51 @@ func main() {
 		fmt.Fprintln(os.Stderr, "jsfixtures:", err)
 		os.Exit(1)
 	}
+}
+
+// A stop of the debugger, as recorded for the debug cases.
+type stopRecord struct {
+	Pos     string        `json:"pos"`
+	Err     string        `json:"err"`
+	Frames  []frameRecord `json:"frames"`
+	Globals []varRecord   `json:"globals"`
+}
+
+type frameRecord struct {
+	Name   string      `json:"name"`
+	Kind   string      `json:"kind"`
+	Pos    string      `json:"pos"`
+	Locals []varRecord `json:"locals"`
+}
+
+type varRecord struct {
+	Name  string `json:"name"`
+	Bound bool   `json:"bound"`
+	Type  string `json:"type"`
+	Value string `json:"value"`
+}
+
+func vars(vs []host.Variable) []varRecord {
+	out := []varRecord{}
+	for _, v := range vs {
+		out = append(out, varRecord{v.Name, v.Bound, v.Type, v.Value})
+	}
+	return out
+}
+
+func recordStop(ctx context.Context, s *host.Stop) stopRecord {
+	r := stopRecord{Pos: s.Pos.String(), Err: s.Err, Frames: []frameRecord{}}
+	frames, err := s.Stack(ctx)
+	if err != nil {
+		panic(err)
+	}
+	for _, f := range frames {
+		r.Frames = append(r.Frames, frameRecord{f.Name, f.Kind, f.Pos.String(), vars(f.Locals)})
+	}
+	globals, err := s.Globals(ctx)
+	if err != nil {
+		panic(err)
+	}
+	r.Globals = vars(globals)
+	return r
 }

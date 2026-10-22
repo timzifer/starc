@@ -654,6 +654,10 @@ func (r *RT) registerCore() {
 		f.Add(GSet(r.ErrObj, get(msg)))
 		// The fuel up to the error counts toward the failing function.
 		f.Add(r.ProfileEnd())
+		if r.Cfg.Debug {
+			// A debugger can stop at the error while the frames exist.
+			f.Add(If(and(GGet(r.DbgMode), c32(DbgErrors)), r.Call("dbg_stop", or(GGet(r.CurPos), c32(DbgErrorStop)))))
+		}
 		if r.Cfg.Backtrace {
 			f.Add(r.Call("bt_collect"), GSet(r.DupKw, c32(0)))
 		}

@@ -159,6 +159,11 @@ those implemented in the prelude, have no statements of their own but
 appear in the call stack (kind `builtin` or `prelude`), for example
 `sorted` between a function and its key function.
 
+With `Errors`, the debugger also stops at a run-time error, before the
+call ends: `Stop.Err` is the message, `Stop.Pos` the failing operation,
+and the stack and variables are those at the error. The call then fails
+as usual.
+
 `Stack` returns the frames outermost first, each with its position (the
 call of the next frame, or the statement of the stop) and, for
 functions of the program and the top level, its local variables.

@@ -3,6 +3,7 @@ package host_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -132,7 +133,7 @@ func TestDebugTransparent(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				out0, err0, fuel0 := runChunk(t, src, nil)
 				stops := 0
-				out1, err1, fuel1 := runChunk(t, src, &host.Debugger{Step: true, Stop: func(ctx context.Context, s *host.Stop) {
+				out1, err1, fuel1 := runChunk(t, src, &host.Debugger{Step: true, Errors: true, Stop: func(ctx context.Context, s *host.Stop) {
 					stops++
 					if stops > 2000 {
 						return
@@ -263,5 +264,57 @@ def f():
 	}
 	if len(stacks) != 2 || stacks[0] != "function:f prelude:sorted function:key" {
 		t.Errorf("stacks: %q", stacks)
+	}
+}
+
+func TestDebugErrorStop(t *testing.T) {
+	ctx := context.Background()
+	src := `
+def avg(xs):
+    total = 0
+    for x in xs:
+        total += x
+    return total / len(xs)
+
+def report(name, xs):
+    label = name.upper()
+    return label + ": " + str(avg(xs))
+`
+	wasm, err := starc.Compile("err.star", []byte(src), &starc.Options{Debug: true, Fuel: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stops []string
+	m, err := host.Load(ctx, wasm, &host.Config{InitFuel: 1 << 30, Debug: &host.Debugger{Errors: true, Stop: func(ctx context.Context, s *host.Stop) {
+		frames, err := s.Stack(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stop := fmt.Sprintf("%q at %d:%d", s.Err, s.Pos.Line, s.Pos.Col)
+		for _, f := range frames {
+			stop += " | " + f.Name
+			for _, v := range f.Locals {
+				stop += " " + v.Name + "=" + v.Value
+			}
+		}
+		stops = append(stops, stop)
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(ctx)
+	if res, err := m.Call(ctx, "report", "ok", []any{int64(2), int64(4)}); err != nil || res != "OK: 3.0" || len(stops) != 0 {
+		t.Fatalf("report = %v, %v; stops %q", res, err, stops)
+	}
+	_, err = m.Call(ctx, "report", "empty", []any{})
+	var e *host.Error
+	if !errors.As(err, &e) || e.Msg != "floating-point division by zero" {
+		t.Fatalf("error: %v", err)
+	}
+	// The stop comes before the call ends, with the frames and variables
+	// at the error (as at the start of the failing statement).
+	want := `"floating-point division by zero" at 6:18 | report name="empty" xs=[] label="EMPTY" | avg xs=[] total=0 x`
+	if len(stops) != 1 || !strings.HasPrefix(stops[0], want) {
+		t.Errorf("stops: %q\nwant prefix %q", stops, want)
 	}
 }
