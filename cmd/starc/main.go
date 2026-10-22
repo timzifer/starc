@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -102,6 +103,8 @@ type buildOpts struct {
 	structs bool
 	noBT    bool
 	profile bool
+	debug   bool
+	breaks  string
 	budget  int64
 	limits  struct {
 		pages, input, result uint
@@ -130,6 +133,8 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 	fs.BoolVar(&o.structs, "struct", false, "provide the struct builtin")
 	fs.BoolVar(&o.noBT, "no-backtrace", false, "omit source positions and call stacks of run-time errors")
 	fs.BoolVar(&o.profile, "profile", false, "record the fuel used by each function (implies -fuel; run: print the profile)")
+	fs.BoolVar(&o.debug, "debug", false, "compile statement hooks for a debugger (see docs/debug.md)")
+	fs.StringVar(&o.breaks, "break", "", "run: comma-separated lines at which to print the call stack and variables (implies -debug)")
 	fs.BoolVar(&o.dialect.While, "while", false, "allow while loops")
 	fs.BoolVar(&o.dialect.TopLevelControl, "toplevel-control", false, "allow if/for/while at top level")
 	fs.BoolVar(&o.dialect.GlobalReassign, "global-reassign", false, "allow reassignment of top-level names")
@@ -143,7 +148,7 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 }
 
 func (o *buildOpts) options() *starc.Options {
-	opts := &starc.Options{NoNames: o.noNames, NoWASI: o.noWASI, Fuel: o.fuel || o.budget > 0 || o.profile, Profile: o.profile, FiniteFloats: o.finite, Struct: o.structs, Dialect: o.dialect,
+	opts := &starc.Options{NoNames: o.noNames, NoWASI: o.noWASI, Fuel: o.fuel || o.budget > 0 || o.profile, Profile: o.profile, Debug: o.debug || o.breaks != "", FiniteFloats: o.finite, Struct: o.structs, Dialect: o.dialect,
 		NoBacktrace: o.noBT, MaxMemoryPages: uint32(min(o.limits.pages, 1<<32-1)), MaxCallDepth: o.limits.depth,
 		MaxInputBytes: uint32(min(o.limits.input, 1<<32-1)), MaxResultBytes: uint32(min(o.limits.result, 1<<32-1))}
 	if o.command {
@@ -269,7 +274,20 @@ func runCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if budget == 0 {
 		budget = math.MaxInt64
 	}
-	m, err := host.Load(ctx, wasm, &host.Config{Stdout: stdout, Stderr: stderr, InitFuel: o.budget})
+	cfg := &host.Config{Stdout: stdout, Stderr: stderr, InitFuel: o.budget}
+	if o.breaks != "" {
+		var lines []int
+		for _, s := range splitList(o.breaks) {
+			n, err := strconv.Atoi(s)
+			if err != nil || n <= 0 {
+				fmt.Fprintf(stderr, "starc: invalid -break line %q\n", s)
+				return 2
+			}
+			lines = append(lines, n)
+		}
+		cfg.Debug = &host.Debugger{Lines: lines, Stop: func(ctx context.Context, s *host.Stop) { printStop(ctx, s, stderr) }}
+	}
+	m, err := host.Load(ctx, wasm, cfg)
 	if err != nil {
 		var exit *host.ExitError
 		if errors.As(err, &exit) {
@@ -434,4 +452,36 @@ func printProfile(ctx context.Context, m *host.Module, w io.Writer) {
 		fmt.Fprintf(tw, "%d\t%.1f\t%d\t%s\n", e.Fuel, pct, e.Calls, name)
 	}
 	_ = tw.Flush()
+}
+
+// printStop writes the call stack and the variables at a stop.
+func printStop(ctx context.Context, s *host.Stop, w io.Writer) {
+	fmt.Fprintf(w, "stop at %s\n", s.Pos)
+	frames, err := s.Stack(ctx)
+	if err != nil {
+		fmt.Fprintln(w, "starc:", err)
+		return
+	}
+	for _, f := range frames {
+		if f.Kind != "function" {
+			fmt.Fprintf(w, "  %s  <builtin>\n", f.Name)
+			continue
+		}
+		fmt.Fprintf(w, "  %s  %s\n", f.Name, f.Pos)
+		printVars(w, f.Locals)
+	}
+	if globals, err := s.Globals(ctx); err == nil && len(globals) > 0 {
+		fmt.Fprintln(w, "  globals")
+		printVars(w, globals)
+	}
+}
+
+func printVars(w io.Writer, vars []host.Variable) {
+	for _, v := range vars {
+		if v.Bound {
+			fmt.Fprintf(w, "    %s = %s\n", v.Name, v.Value)
+		} else {
+			fmt.Fprintf(w, "    %s (unbound)\n", v.Name)
+		}
+	}
 }

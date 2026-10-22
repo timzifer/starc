@@ -22,13 +22,15 @@ Functions are imported only when the program needs them. From
 | `proc_exit` | terminating a command module after an error |
 
 From `starc_host`, if the program calls host functions (see
-[Host functions](#host-functions)) or was built without WASI:
+[Host functions](#host-functions)), was built without WASI or is a debug
+build:
 
 | Import | Signature | Used for |
 |---|---|---|
 | *name* | `(ptr: i32, len: i32) -> i32` | one import per host function, under its dotted name, e.g. `ctx.entity` |
 | `starc_result` | `(dst: i32) -> ()` | copies the pending outcome of the last host call to `dst` |
 | `starc_print` | `(ptr: i32, len: i32) -> ()` | `print` without WASI: the UTF-8 text of one line, including the trailing newline |
+| `starc_dbg` | `(pos: i32) -> ()` | a stop of a debug build at the statement with position id `pos` (see [debug.md](debug.md#debug-builds)) |
 
 ### Modules without WASI
 
@@ -55,6 +57,7 @@ rejects such a module if it imports anything from WASI.
 | `starc_fuel_set` | `(n: i64) -> ()` | sets the remaining fuel budget (only with fuel metering, see [fuel.md](fuel.md)) |
 | `starc_fuel` | `() -> i64` | returns the remaining fuel budget (only with fuel metering) |
 | `starc_profile`, … | | the fuel profile (only with `Options.Profile`, see [debug.md](debug.md)) |
+| `starc_dbg_*` | | inspection during a stop (only in debug builds, see [debug.md](debug.md#debug-builds)) |
 | *function* | `(ptr: i32, len: i32) -> i64` | one export per exported top-level `def` |
 
 By default every top-level `def` whose name does not start with `_` is
@@ -62,9 +65,10 @@ exported under its own name; `Options.Exports` / `-export` selects a
 subset. The names `memory`, `_initialize`, `_start`, `starc_alloc`,
 `starc_error`, `starc_error_code`, `starc_frames`, `starc_frame`,
 `starc_frame_pos`, `starc_fuel_set`, `starc_fuel`, `starc_profile`,
-`starc_profile_fuel`, `starc_profile_calls` and `starc_profile_reset`
-are reserved. The three frame functions are missing in modules built with
-`Options.NoBacktrace` (`-no-backtrace`).
+`starc_profile_fuel`, `starc_profile_calls`, `starc_profile_reset` and
+all names starting with `starc_dbg_` are reserved. The three frame
+functions are missing in modules built with `Options.NoBacktrace`
+(`-no-backtrace`).
 
 ### Command
 
@@ -262,7 +266,8 @@ there are none; `no_wasi` is omitted for modules that may import WASI.
 the name of the source file in [backtraces](#backtraces) and is omitted
 for a module built without them.
 
-Modules built with a profile also contain the section `starc.debug`,
+Modules built with a profile or for debugging also contain the section
+`starc.debug`,
 which maps functions and positions to the source (see
 [debug.md](debug.md#debug-information)).
 

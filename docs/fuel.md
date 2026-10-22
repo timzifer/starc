@@ -33,8 +33,9 @@ in [abi.md](abi.md)).
 The budget is not reset between calls. To give each call its own budget,
 set it before the call. The fuel consumed is the budget minus the
 remaining fuel afterwards. Set the budget before `_initialize` (or
-`_start`) to limit the top-level code, which is metered as well,
-including the initialization of the runtime library.
+`_start`) to limit the top-level code, which is metered as well. The
+runtime library's own data structures, such as the cache of small ints
+and the shadow stack of backtraces, are set up without fuel.
 
 In Go, package `host` provides this as `Config.InitFuel` (the budget
 for the top-level code), `Module.SetFuel` and `Module.Fuel`; the error

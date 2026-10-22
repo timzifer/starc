@@ -15,6 +15,7 @@ const (
 	HostModule = "starc_host"
 	HostResult = "starc_result" // (dst i32) -> ()
 	HostPrint  = "starc_print"  // (ptr i32, len i32) -> (), without WASI
+	HostDbg    = "starc_dbg"    // (pos i32) -> (), debug builds: a stop
 )
 
 // Member is a named member of a module object.

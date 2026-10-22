@@ -21,6 +21,9 @@ type DebugInfo struct {
 	// Positions are the source positions (line, col) by position id;
 	// entry 0 is unknown.
 	Positions [][2]int `json:"positions"`
+	// Statements are the position ids of the statements of a debug
+	// build, where it can stop.
+	Statements []uint32 `json:"statements,omitempty"`
 }
 
 // DebugFunction describes a function of the profile.

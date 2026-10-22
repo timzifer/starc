@@ -40,6 +40,9 @@ type Config struct {
 	// InitFuel is the fuel budget for running the top-level code of a
 	// module built with fuel metering. 0 means unlimited.
 	InitFuel int64
+	// Debug stops a module built with Options.Debug at statements (see
+	// docs/debug.md). It is nil for no stops.
+	Debug *Debugger
 }
 
 // Func implements a host function. It receives the positional and
@@ -99,6 +102,7 @@ const (
 	hostModule = "starc_host"
 	hostResult = "starc_result"
 	hostPrint  = "starc_print"
+	hostDbg    = "starc_dbg"
 	wasiModule = "wasi_snapshot_preview1"
 )
 
@@ -308,7 +312,7 @@ func Load(ctx context.Context, wasm []byte, cfg *Config) (*Module, error) {
 	if m.debug, err = debugOf(cm); err != nil {
 		return fail(err)
 	}
-	if m.hostMod, err = instantiateHost(ctx, m.rt, cm, cfg); err != nil {
+	if m.hostMod, err = instantiateHost(ctx, m.rt, cm, cfg, m.debug); err != nil {
 		return fail(err)
 	}
 	if m.hostMod != nil {
@@ -342,6 +346,10 @@ func Load(ctx context.Context, wasm []byte, cfg *Config) (*Module, error) {
 	m.fuelSet = mod.ExportedFunction("starc_fuel_set")
 	m.fuelGet = mod.ExportedFunction("starc_fuel")
 	m.initProfile(mod)
+	if err := m.startDebugger(ctx, cfg.Debug); err != nil {
+		_ = mod.Close(ctx)
+		return fail(err)
+	}
 	if cfg.InitFuel != 0 {
 		if err := m.SetFuel(ctx, cfg.InitFuel); err != nil {
 			_ = mod.Close(ctx)

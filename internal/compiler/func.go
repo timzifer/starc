@@ -18,6 +18,10 @@ type fcomp struct {
 	self   Local
 	loops  []*loop
 	spec   uint32 // non-zero if a recursion guard is active
+	// dbgVars are the variables that a debug build stores at each
+	// statement, in the order of the function's debug descriptor.
+	dbgVars []Local
+	dbgArea Local
 	// pos is the position of the operation being compiled, maintained as
 	// by go.starlark.net's compiler so that errors report the same
 	// positions.
@@ -67,6 +71,9 @@ func (c *compiler) compileToplevel(u *unit) *Func {
 		if b.Scope == resolve.Cell {
 			f.Add(Set(l, c.r.Call("cell", I32c(0))))
 		}
+	}
+	if d := fc.debugVars(mod.Locals, nil); d != 0 {
+		c.r.DebugToplevel(d)
 	}
 	if !u.prelude {
 		f.Add(c.r.PushToplevel())
@@ -160,6 +167,9 @@ func (fc *fcomp) function(fn *resolve.Function, outer *fcomp) Expr {
 		inner.free = append(inner.free, l)
 		f.Add(Set(l, r.FreeVar(Get(f.Param(2)), i)))
 	}
+	if d := inner.debugVars(fn.Locals, fn.FreeVars); d != 0 {
+		r.DebugFunction(spec, d)
+	}
 	f.Add(inner.block(fn.Body, rt.FuelCall)...)
 	f.Add(inner.ret(r.NoneV()))
 
@@ -236,6 +246,14 @@ func (fc *fcomp) block(stmts []syntax.Stmt, extra int64) []Expr {
 	}
 	out := []Expr{fc.c.r.ChargeN(n*rt.FuelStatement + extra)}
 	for _, s := range stmts {
+		if fc.c.opts.Debug && !fc.u.prelude {
+			start, _ := s.Span()
+			vars := make([]Expr, len(fc.dbgVars))
+			for i, l := range fc.dbgVars {
+				vars[i] = Get(l)
+			}
+			out = append(out, fc.c.r.DebugStatement(fc.c.r.Pos(int(start.Line), int(start.Col)), fc.dbgArea, vars))
+		}
 		out = append(out, fc.stmt(s))
 	}
 	return out

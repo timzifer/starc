@@ -251,6 +251,7 @@ func (r *RT) initFrames() Expr {
 		GSet(r.StackBase, r.Call("alloc_free", c32(8*r.frameSlots()))),
 		GSet(r.SP, GGet(r.StackBase)),
 		GSet(r.StackLimit, add(GGet(r.StackBase), c32(8*r.frameSlots()))),
+		r.initDebugAreas(),
 	}
 }
 
