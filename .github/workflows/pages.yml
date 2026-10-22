@@ -1,0 +1,53 @@
+name: Pages
+
+# Publishes the playground (web/), with the compiler built for JavaScript,
+# to GitHub Pages: https://timzifer.github.io/starc/
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build the playground
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - name: Build
+        run: |
+          mkdir -p site
+          GOOS=js GOARCH=wasm go build -trimpath \
+            -ldflags="-s -w -X github.com/timzifer/starc.Version=main-${GITHUB_SHA::7}" \
+            -o site/starc.wasm ./cmd/starc-js
+          cp web/* js/host.mjs js/compiler.mjs site/
+          cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" site/
+          ls -l site
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

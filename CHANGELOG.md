@@ -8,6 +8,15 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+* JavaScript: the compiler builds as WebAssembly (`cmd/starc-js`,
+  `js/compiler.mjs`) and compiles programs in the browser or Node.js,
+  with errors positioned for editor markers; `js/host.mjs` runs modules
+  from JavaScript (values, host functions, fuel, errors with backtraces,
+  profiles), with TypeScript types. A parity test requires the same
+  module bytes, results and fuel as the native compiler and the Go host.
+  A playground is published on GitHub Pages. See docs/js.md.
+* `abi.Dict.Get` and `Len` accept a nil `*Dict`, the keyword arguments of
+  a host function called without any.
 * `load` statements: `Options.Loader` provides the source of the modules
   they name; all modules are compiled into one WebAssembly module,
   each initialized once and frozen, and unused functions of loaded

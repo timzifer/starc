@@ -10,6 +10,7 @@
 [![Release](https://img.shields.io/github/v/release/timzifer/starc?sort=semver)](https://github.com/timzifer/starc/releases)
 [![Go version](https://img.shields.io/github/go-mod/go-version/timzifer/starc)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Playground](https://img.shields.io/badge/try%20it-playground-2f6fdb)](https://timzifer.github.io/starc/)
 
 **starc** is an ahead-of-time compiler from [Starlark](https://github.com/bazelbuild/starlark)
 to WebAssembly, written in Go.
@@ -170,6 +171,24 @@ Hard limits complete the sandbox: memory (`MaxMemoryPages`), call depth
 (`MaxInputBytes`, `MaxResultBytes`). Exceeding one is a defined error
 (`host.ErrOutOfMemory`, `host.ErrCallDepth`, `host.ErrTooLarge`) on
 every platform; see [docs/abi.md](docs/abi.md#limits).
+
+## In the browser
+
+The compiler also runs as WebAssembly in the browser (or Node.js), and
+`js/host.mjs` runs the modules from JavaScript, with the same results and
+fuel as on a server. Try the [playground](https://timzifer.github.io/starc/);
+see [docs/js.md](docs/js.md) for the API.
+
+```js
+import { loadCompiler } from "./compiler.mjs";
+import { load } from "./host.mjs";
+
+const compiler = await loadCompiler("starc.wasm");
+const { wasm, errors } = compiler.compile(src, { fuel: true });
+const m = await load(wasm, { stdout: console.log });
+m.setFuel(10_000);
+console.log(m.call("fib", 30), m.fuel());
+```
 
 ## Module interface
 
