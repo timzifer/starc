@@ -448,6 +448,27 @@ func checkExports(cm wazero.CompiledModule, meta *Meta) error {
 			return err
 		}
 	}
+	// A module built with a profile exports all of its profile functions.
+	profile := []struct {
+		name            string
+		params, results []api.ValueType
+	}{
+		{"starc_profile", nil, []api.ValueType{i32}},
+		{"starc_profile_fuel", []api.ValueType{i32}, []api.ValueType{i64}},
+		{"starc_profile_calls", []api.ValueType{i32}, []api.ValueType{i64}},
+		{"starc_profile_reset", nil, nil},
+	}
+	for _, p := range profile {
+		if _, ok := defs[p.name]; !ok {
+			continue
+		}
+		for _, p := range profile {
+			if err := check(p.name, p.params, p.results); err != nil {
+				return err
+			}
+		}
+		break
+	}
 	switch meta.Model {
 	case "command":
 		return check("_start", nil, nil)

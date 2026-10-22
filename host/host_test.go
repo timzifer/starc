@@ -183,3 +183,22 @@ func TestMalformedModule(t *testing.T) {
 		t.Errorf("unknown model: err = %v", err)
 	}
 }
+
+// A module with an incomplete set of profile functions is rejected when it
+// is loaded, not when its profile is read (issue #47).
+func TestMalformedProfile(t *testing.T) {
+	wasm, err := starc.Compile("p.star", []byte("def f(x):\n    return x + 1\n"), &starc.Options{Fuel: true, Profile: true, NoWASI: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"starc_profile_fuel", "starc_profile_calls", "starc_profile_reset"} {
+		broken := bytes.ReplaceAll(wasm, []byte(name), []byte(name[:len(name)-1]+"X"))
+		m, err := host.Load(context.Background(), broken, nil)
+		if err == nil {
+			m.Close(context.Background())
+		}
+		if err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s renamed: err = %v", name, err)
+		}
+	}
+}
