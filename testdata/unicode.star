@@ -8,3 +8,8 @@ print(["\x00\x1f\x7f\u0080\u009f", "\"\\'"], {"\u2029": "\U0001f600"}, ("\U00030
 print("%r" % "\t\u00a0", "{!r}".format("\u2028"), str(["\x0b"]))
 s = "a\u00e9\u2713\U0001f600"
 print([s[i:j] for i in range(len(s)) for j in range(i + 1, len(s) + 1)])
+---
+# hash works on code points (go.starlark.net's javaStringHash).
+print(hash("\u00e9"), hash("h\u00e9llo"), hash("\u2713"), hash("\U0001f600"), hash("a\U0010ffffb"))
+print(hash(""), hash("abc"), hash("\ufffd"), hash("\u00e9".elems()[0] + "x"), hash("\u2713\U0001f600"[1:]))
+print([hash(c) for c in "a\u00e9\u2713\U0001f600".elems()])
