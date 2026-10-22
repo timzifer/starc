@@ -103,6 +103,10 @@ and the project follows [Semantic Versioning](https://semver.org/).
   means `strconv.IsPrint` of the Go release that builds starc.
 * `hash` of strings with non-ASCII characters matches go.starlark.net:
   it combines code points rather than UTF-8 bytes.
+* `count("")` and `replace("", x)` work on code points rather than
+  bytes, so `replace` no longer splits multi-byte characters.
+  `find("", start, end)` and `rfind` with `end < start` return `start`,
+  as in go.starlark.net.
 
 ## [0.1.1] - 2026-10-20
 

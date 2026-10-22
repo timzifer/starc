@@ -413,6 +413,36 @@ func (r *RT) registerBuiltins() {
 				r.Call("norm_index", r.Call("as_int", arg(args, 1), r.S("_byte")), slen(get(s)))), 0))),
 		)
 	})
+	// _utf8_width(s, i) -> length of the UTF-8 sequence at byte i < len(s),
+	// 1 for an invalid byte
+	r.builtin("_utf8_width", func(f *Func, args, kw Local) {
+		s, i := f.Local(I32), f.Local(I32)
+		f.Add(
+			r.checkArgs("_utf8_width", args, kw, 2, 2),
+			Set(s, arg(args, 0)),
+			Set(i, I32WrapI64(i64v(arg(args, 1)))),
+			r.Call("int", I64ExtendI32U(I32ShrU(
+				r.Call("utf8_decode", add(sbytes(get(s)), get(i)), sub(slen(get(s)), get(i))), c32(runeShift)))),
+		)
+	})
+	// _rune_count(s) -> number of code points of s, counting each invalid
+	// byte as one (utf8.RuneCountInString)
+	r.builtin("_rune_count", func(f *Func, args, kw Local) {
+		s, i, n := f.Local(I32), f.Local(I32), f.Local(I32)
+		brk, cont := NewLabel(), NewLabel()
+		f.Add(
+			r.checkArgs("_rune_count", args, kw, 1, 1),
+			Set(s, arg(args, 0)),
+			Block(brk, r.loop(cont,
+				BrIf(brk, ge(get(i), slen(get(s)))),
+				Set(i, add(get(i), I32ShrU(
+					r.Call("utf8_decode", add(sbytes(get(s)), get(i)), sub(slen(get(s)), get(i))), c32(runeShift)))),
+				Set(n, add(get(n), c32(1))),
+				Br(cont),
+			)),
+			r.Call("int", I64ExtendI32U(get(n))),
+		)
+	})
 
 	// ---- list methods ----
 	r.builtin("list.append", func(f *Func, args, kw Local) {
@@ -504,6 +534,9 @@ func (r *RT) registerBuiltins() {
 				Set(b, slen(get(s))),
 				If(optArg(args, 2), Set(a, I32WrapI64(r.Call("clamp", r.Call("as_int", arg(args, 2), r.S(name)), I64ExtendI32S(slen(get(s))), c32(0))))),
 				If(optArg(args, 3), Set(b, I32WrapI64(r.Call("clamp", r.Call("as_int", arg(args, 3), r.S(name)), I64ExtendI32S(slen(get(s))), c32(0))))),
+				// Like go.starlark.net, search an empty slice at start if
+				// end < start, where "" is found.
+				If(lt(get(b), get(a)), Set(b, get(a))),
 				r.Call("int", I64ExtendI32S(r.Call("str_"+name, get(s), get(x), get(a), get(b)))),
 			)
 		})

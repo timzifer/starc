@@ -131,7 +131,7 @@ def dir(x):
 def _str_count(self, sub, start = None, end = None):
     s = self[start:end]
     if sub == "":
-        return len(s) + 1
+        return _rune_count(s) + 1
     n = 0
     i = s.find(sub)
     while i >= 0:
@@ -290,16 +290,18 @@ def _str_replace(self, old, new, count = -1):
     i = 0
     n = 0
     if old == "":
-        for c in self.elems():
-            if count >= 0 and n >= count:
-                res.append(self[i:])
-                return "".join(res)
+        # new goes before every code point (or invalid byte) and at the end.
+        if count == 0:
+            return self
+        res.append(new)
+        n = 1
+        while i < len(self) and (count < 0 or n < count):
+            j = i + _utf8_width(self, i)
+            res.append(self[i:j])
             res.append(new)
-            res.append(c)
-            i += 1
+            i = j
             n += 1
-        if count < 0 or n < count:
-            res.append(new)
+        res.append(self[i:])
         return "".join(res)
     while count < 0 or n < count:
         j = self.find(old, i)
