@@ -99,6 +99,7 @@ const els = {
   fn: $("function"), args: $("args"), budget: $("budget"), run: $("run"),
   result: $("result"), fuel: $("fuel"), module: $("module"), output: $("output"), profile: $("profile").tBodies[0],
   version: $("version"),
+  downloadWasm: $("download-wasm"), downloadStar: $("download-star"),
 };
 
 let compiler = null;
@@ -335,6 +336,30 @@ async function run() {
   showProfile(m.profile());
 }
 
+// ---- downloads ----
+
+function download(name, data, type) {
+  const url = URL.createObjectURL(new Blob([data], { type }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// The downloaded module is compiled from the current source, without the
+// profile that the playground records.
+els.downloadWasm.addEventListener("click", () => {
+  const { wasm, errors } = compiler.compile(els.source.value, { ...OPTIONS, profile: false });
+  showDiagnostics(errors);
+  if (!wasm) {
+    setStatus("fix the compile errors to download the module", "error");
+    return;
+  }
+  download("program.wasm", wasm, "application/wasm");
+});
+els.downloadStar.addEventListener("click", () => download("program.star", els.source.value, "text/plain"));
+
 // Compiles on edits (debounced) to update the function list and markers.
 let timer = 0;
 els.source.addEventListener("input", () => {
@@ -394,6 +419,7 @@ try {
   setStatus(`compiler ready in ${((performance.now() - t0) / 1000).toFixed(1)} s`, "ok");
   els.version.textContent = `starc ${compiler.version}`;
   els.run.disabled = false;
+  els.downloadWasm.disabled = false;
   run();
 } catch (e) {
   setStatus(`cannot load the compiler: ${e.message}`, "error");
