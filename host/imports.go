@@ -24,7 +24,7 @@ func checkImports(cm wazero.CompiledModule, meta *Meta, funcs map[string]Func) e
 				return fmt.Errorf("host: module built without WASI imports %s.%s", mod, name)
 			}
 		case hostModule:
-			if name == hostResult || name == hostPrint {
+			if name == hostResult || name == hostPrint || name == hostDbg {
 				continue
 			}
 			if f, ok := funcs[name]; !ok || f == nil {
@@ -89,7 +89,7 @@ func protocolError(format string, args ...any) {
 
 // instantiateHost instantiates an anonymous starc_host module with the
 // functions that cm imports, or returns nil if it imports none.
-func instantiateHost(ctx context.Context, r wazero.Runtime, cm wazero.CompiledModule, cfg *Config) (api.Module, error) {
+func instantiateHost(ctx context.Context, r wazero.Runtime, cm wazero.CompiledModule, cfg *Config, dbg *DebugInfo) (api.Module, error) {
 	st := &hostState{}
 	b := r.NewHostModuleBuilder(hostModule)
 	found := false
@@ -104,6 +104,8 @@ func instantiateHost(ctx context.Context, r wazero.Runtime, cm wazero.CompiledMo
 		switch name {
 		case hostResult:
 			fb = fb.WithGoModuleFunction(api.GoModuleFunc(st.result), []api.ValueType{i32}, nil)
+		case hostDbg:
+			fb = fb.WithGoModuleFunction(stopFunc(cfg.Debug, dbg), []api.ValueType{i32}, nil)
 		case hostPrint:
 			out := cfg.Stdout
 			if out == nil {

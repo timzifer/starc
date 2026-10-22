@@ -100,7 +100,7 @@ const (
 	offSpecNames  = 16
 	offSpecActive = 20
 	offSpecShow   = 24 // name in backtraces of a prelude function, 0 if hidden
-	sizeSpec      = 32
+	sizeSpec      = 40 // offSpecProf at 28, offSpecDbg at 32
 )
 
 // flagRepr marks a list or dict whose repr is in progress, to detect cycles.
@@ -164,6 +164,9 @@ type Config struct {
 	// Profile attributes fuel to functions (see profile.go). It requires
 	// Fuel and Backtrace.
 	Profile bool
+	// Debug compiles statement hooks for a debugger (see debug.go). It
+	// requires Backtrace.
+	Debug bool
 }
 
 // RT is the runtime library for one module.
@@ -206,6 +209,17 @@ type RT struct {
 	ProfPrelude *Global // whether the current entry is a prelude function
 	profEntries []ProfileEntry
 	profTab     uint32
+
+	// Debug builds (see debug.go).
+	DbgMode      *Global // DbgOff, DbgBreak or DbgStep
+	DbgPos       *Global // position id of the current stop
+	DbgAreas     *Global // locals areas, one per frame slot
+	DbgReading   *Global // whether the host is reading a value
+	dbgImport    *Import
+	dbgBreaks    uint32 // static breakpoint flags by position id
+	dbgTop       uint32 // descriptor of the top level
+	dbgMaxLocals int
+	dbgStmts     []uint32
 
 	None, False, True uint32
 
@@ -288,6 +302,7 @@ func New(m *Module, cfg Config) *RT {
 	r.initLimits()
 	r.initBacktrace()
 	r.initProfile()
+	r.initDebug()
 	r.registerCore()
 	r.registerNum()
 	r.registerStr()
@@ -337,15 +352,22 @@ func (r *RT) Finish() *Func {
 	f := r.M.AddFunc(NewFunc("rt.init_static", nil))
 	f.Add(r.fixups...)
 	if _, ok := r.funcs["int"]; ok {
+		// The cache is the runtime's own: building it costs no fuel, so
+		// that fuel does not depend on which runtime functions a module
+		// contains (a debug build contains more).
 		t, i, o := f.Local(I32), f.Local(I32), f.Local(I32)
+		brk, cont := NewLabel(), NewLabel()
 		f.Add(
-			Set(t, r.Call("alloc", c32(4*intCacheSize))),
-			r.forRange(i, c32(0), c32(intCacheSize),
-				Set(o, r.Call("alloc", c32(16))),
+			Set(t, r.Call("alloc_free", c32(4*intCacheSize))),
+			Block(brk, Loop(cont,
+				BrIf(brk, ge(get(i), c32(intCacheSize))),
+				Set(o, r.Call("alloc_free", c32(16))),
 				st(get(o), 0, c32(TInt|1<<8)),
 				I64Store(get(o), offInt, I64ExtendI32S(sub(get(i), c32(intCacheMin)))),
 				st(elem(get(t), 0, get(i)), 0, get(o)),
-			),
+				Set(i, add(get(i), c32(1))),
+				Br(cont),
+			)),
 			GSet(r.IntCache, get(t)),
 		)
 	}
@@ -354,6 +376,7 @@ func (r *RT) Finish() *Func {
 	f.Add(r.initReprMarks())
 	r.layoutPositions()
 	r.layoutProfile()
+	r.layoutDebug()
 	end := (r.M.DataEnd() + 7) &^ 7
 	r.Heap.Init = int64(end)
 	r.HeapMark.Init = int64(end)
@@ -621,6 +644,11 @@ func (r *RT) registerCore() {
 	// fail(msg string): records the error and traps.
 	r.define("fail", p1, r0, func(f *Func) {
 		msg := f.Param(0)
+		if r.Cfg.Debug {
+			// An error while the host reads a value during a stop fails
+			// only the read, leaving the stopped program as it is.
+			f.Add(If(GGet(r.DbgReading), Seq{GSet(r.ErrObj, get(msg)), r.reprUnwind(), Unreachable()}))
+		}
 		f.Add(GSet(r.ErrObj, get(msg)))
 		// The fuel up to the error counts toward the failing function.
 		f.Add(r.ProfileEnd())

@@ -127,3 +127,20 @@ func TestProfile(t *testing.T) {
 		t.Errorf("top level: code %d stderr %q", code, stderr)
 	}
 }
+
+func TestBreak(t *testing.T) {
+	code, stdout, stderr := cli(t, "", "run", "-break", "7", "../../examples/fib.star", "fib", "2")
+	if code != 0 || stdout != "fib(30) = 832040\n1\n" {
+		t.Fatalf("code %d stdout %q stderr %q", code, stdout, stderr)
+	}
+	// 30 stops at start-up, 2 in the call.
+	if n := strings.Count(stderr, "stop at ../../examples/fib.star:7:"); n != 32 {
+		t.Errorf("%d stops:\n%s", n, stderr)
+	}
+	if !strings.Contains(stderr, "  fib  ../../examples/fib.star:7:") || !strings.Contains(stderr, "    a = 0\n    b = 1\n") {
+		t.Errorf("stack:\n%.600s", stderr)
+	}
+	if code, _, _ := cli(t, "", "run", "-break", "x", "../../examples/fib.star"); code != 2 {
+		t.Errorf("invalid line: code %d", code)
+	}
+}

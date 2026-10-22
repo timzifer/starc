@@ -8,6 +8,15 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+* Debug builds: `Options.Debug` (`-debug`) compiles hooks at the
+  statements of the program. `host.Config.Debug` stops at breakpoint
+  lines or at every statement and calls `Debugger.Stop`, where
+  `Stop.Stack` returns the call stack with the local variables of each
+  frame and `Stop.Globals` the global variables. A stop changes neither
+  the results nor the fuel. `starc run -break LINE` prints the stack and
+  variables at each stop. Debug builds import `starc_host.starc_dbg`;
+  export names starting with `starc_dbg_` are reserved. See
+  docs/debug.md.
 * Fuel profile: `Options.Profile` (`-profile`) records the fuel that
   each function of the program, built-in and host function uses, without
   changing the fuel consumption. `host.Module.Profile` and

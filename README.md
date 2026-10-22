@@ -149,7 +149,11 @@ See [docs/fuel.md](docs/fuel.md) for the cost table.
 
 With `Options.Profile` (`starc run -profile`), the module also records
 the fuel used by each function, without changing its fuel consumption;
-`host.Module.Profile` reads it. See [docs/debug.md](docs/debug.md).
+`host.Module.Profile` reads it. A debug build (`Options.Debug`,
+`starc run -break LINE`) stops at statements for `host.Config.Debug` to
+inspect the call stack and variables, again without changing results or
+fuel, so recorded calls can be replayed and inspected. See
+[docs/debug.md](docs/debug.md).
 
 Hard limits complete the sandbox: memory (`MaxMemoryPages`), call depth
 (`MaxCallDepth`, 500 by default) and the size of arguments and results

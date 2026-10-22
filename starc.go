@@ -105,6 +105,12 @@ type Options struct {
 	// which host.Module.Profile reads. It requires Fuel and backtraces;
 	// a profiled module uses exactly the same fuel as one without.
 	Profile bool
+	// Debug compiles hooks at the statements of the program, at which
+	// host.Config.Debug can stop it to inspect the call stack and the
+	// variables (see docs/debug.md). It requires backtraces. A debug
+	// build uses the same fuel and gives the same results as a release
+	// build, but is larger and slower.
+	Debug bool
 }
 
 // maxCallDepth bounds Options.MaxCallDepth; no engine supports deeper
@@ -200,6 +206,7 @@ func Compile(filename string, src []byte, opts *Options) ([]byte, error) {
 		Struct:         opts.Struct,
 		NoBacktrace:    opts.NoBacktrace,
 		Profile:        opts.Profile,
+		Debug:          opts.Debug,
 		Dialect: syntax.FileOptions{
 			While:           opts.Dialect.While,
 			TopLevelControl: opts.Dialect.TopLevelControl,

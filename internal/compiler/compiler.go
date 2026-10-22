@@ -61,6 +61,9 @@ type Options struct {
 	// Profile attributes fuel to functions; it requires Fuel and
 	// backtraces.
 	Profile bool
+	// Debug compiles statement hooks for a debugger; it requires
+	// backtraces.
+	Debug bool
 }
 
 // Error is a compilation error at a source position.
@@ -132,6 +135,9 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 	if opts.Profile && (!opts.Fuel || opts.NoBacktrace) {
 		return nil, errors.New("a profile requires fuel metering and backtraces")
 	}
+	if opts.Debug && opts.NoBacktrace {
+		return nil, errors.New("a debug build requires backtraces")
+	}
 	host, err := hostTree(opts.Host)
 	if err != nil {
 		return nil, err
@@ -160,7 +166,8 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 	}
 	r := rt.New(m, rt.Config{Command: opts.Command, NoWASI: opts.NoWASI, Fuel: opts.Fuel, FiniteFloats: opts.FiniteFloats,
 		MaxCallDepth: opts.MaxCallDepth, MaxInputBytes: opts.MaxInputBytes, MaxResultBytes: opts.MaxResultBytes,
-		Backtrace: !opts.NoBacktrace, Filename: filename, Profile: opts.Profile})
+		Backtrace: !opts.NoBacktrace, Filename: filename, Profile: opts.Profile,
+		Debug: opts.Debug})
 	c.m, c.r = m, r
 
 	preludeUniverse := func(name string) bool {
@@ -306,6 +313,9 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 	if opts.Profile {
 		c.profileExports()
 	}
+	if opts.Debug {
+		c.debugExports()
+	}
 
 	r.LayoutMethods()
 	static := r.Finish()
@@ -331,7 +341,7 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 			InputBytes: int(opts.MaxInputBytes), ResultBytes: int(opts.MaxResultBytes)}, opts.FiniteFloats,
 		map[bool]string{false: filename}[opts.NoBacktrace]})
 	m.Customs = append(m.Customs, Custom{Name: MetaSection, Payload: payload})
-	if opts.Profile {
+	if opts.Profile || opts.Debug {
 		m.Customs = append(m.Customs, Custom{Name: DebugSection, Payload: c.debugSection(filename)})
 	}
 
@@ -428,7 +438,7 @@ func (c *compiler) exportList() ([]string, error) {
 		var names []string
 		for _, stmt := range c.user.file.Stmts {
 			if d, ok := stmt.(*syntax.DefStmt); ok && !strings.HasPrefix(d.Name.Name, "_") {
-				if reserved[d.Name.Name] {
+				if reserved[d.Name.Name] || strings.HasPrefix(d.Name.Name, debugPrefix) {
 					return nil, ErrorList{{d.Name.NamePos, fmt.Sprintf("function name %q collides with a reserved export", d.Name.Name)}}
 				}
 				names = append(names, d.Name.Name)
@@ -437,7 +447,7 @@ func (c *compiler) exportList() ([]string, error) {
 		return dedupe(names), nil
 	}
 	for _, name := range c.opts.Exports {
-		if reserved[name] {
+		if reserved[name] || strings.HasPrefix(name, debugPrefix) {
 			return nil, fmt.Errorf("export %q collides with a reserved export", name)
 		}
 		if _, ok := c.user.defs[name]; !ok {
