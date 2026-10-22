@@ -116,6 +116,10 @@ and the project follows [Semantic Versioning](https://semver.org/).
   separator recognize Unicode white space (`unicode.IsSpace`, such as
   U+00A0 and U+3000), and stripping a cutset works on code points rather
   than bytes, as in go.starlark.net.
+* `codepoints()`, `codepoint_ords()` and `ord` decode bytes that are not
+  valid UTF-8 as U+FFFD, as in go.starlark.net; before, `codepoints()`
+  grouped them by their leading byte and `codepoint_ords()` and `ord`
+  failed.
 
 ## [0.1.1] - 2026-10-20
 

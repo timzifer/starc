@@ -381,26 +381,17 @@ func (r *RT) registerBuiltins() {
 		)
 	})
 	r.builtin("ord", func(f *Func, args, kw Local) {
-		s, n, b0, cp, i := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
-		byteAt := func(i Expr) Expr { return I32Load8U(add(sbytes(get(s)), i), 0) }
+		s, n, d := f.Local(I32), f.Local(I32), f.Local(I32)
 		f.Add(
 			r.checkArgs("ord", args, kw, 1, 1),
 			Set(s, arg(args, 0)),
 			If(not(isTag(get(s), TString)), r.Fail("ord: got ", r.TypeName(get(s)), ", want string")),
 			Set(n, slen(get(s))),
 			If(eqz(get(n)), r.Fail("ord: string encodes 0 Unicode code points, want 1")),
-			Set(b0, byteAt(c32(0))),
-			If(lt(get(b0), c32(0x80)), Seq{
-				If(ne(get(n), c32(1)), r.Fail("ord: string encodes more than one Unicode code point")),
-				Return(r.Call("int", I64ExtendI32U(get(b0)))),
-			}),
-			// multi-byte sequence: length from the leading byte
-			Set(i, IfV(I32, eq(and(get(b0), c32(0xe0)), c32(0xc0)), c32(2),
-				IfV(I32, eq(and(get(b0), c32(0xf0)), c32(0xe0)), c32(3), c32(4)))),
-			If(ne(get(i), get(n)), r.Fail("ord: string encodes more than one Unicode code point")),
-			Set(cp, and(get(b0), I32ShrU(c32(0x7f), get(i)))),
-			r.forRange(b0, c32(1), get(n), Set(cp, or(I32Shl(get(cp), c32(6)), and(byteAt(get(b0)), c32(0x3f))))),
-			r.Call("int", I64ExtendI32U(get(cp))),
+			// A single invalid byte is U+FFFD, as in go.starlark.net.
+			Set(d, r.Call("utf8_decode", sbytes(get(s)), get(n))),
+			If(ne(I32ShrU(get(d), c32(runeShift)), get(n)), r.Fail("ord: string encodes more than one Unicode code point")),
+			r.Call("int", I64ExtendI32U(and(get(d), c32(1<<runeShift-1)))),
 		)
 	})
 

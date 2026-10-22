@@ -362,20 +362,22 @@ def _str_codepoints(self):
     i = 0
     n = len(self)
     while i < n:
-        b = _byte(self, i)
-        k = 1
-        if b >= 0xf0:
-            k = 4
-        elif b >= 0xe0:
-            k = 3
-        elif b >= 0xc0:
-            k = 2
-        res.append(self[i:i + k])
+        k = _utf8_width(self, i)
+        if k == 1 and _byte(self, i) >= 0x80:
+            res.append(chr(0xfffd))  # an invalid byte
+        else:
+            res.append(self[i:i + k])
         i += k
     return res
 
 def _str_codepoint_ords(self):
-    return [ord(c) for c in self.codepoints()]
+    res = []
+    i = 0
+    n = len(self)
+    while i < n:
+        res.append(_rune_at(self, i))
+        i += _utf8_width(self, i)
+    return res
 
 def _str_elem_ords(self):
     return [_byte(self, i) for i in range(len(self))]
