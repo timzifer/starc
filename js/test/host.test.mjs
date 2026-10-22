@@ -77,4 +77,14 @@ test("calls with JavaScript values", async () => {
   const res = compiler.compile("x = (", { filename: "e.star" });
   assert.equal(res.wasm, null);
   assert.deepEqual(res.errors, [{ file: "e.star", line: 1, col: 6, msg: "got end of file, want primary expression" }]);
+
+  // Host functions are own properties of config.host, never inherited ones
+  // like Object.prototype.toString (issue #49).
+  for (const name of ["toString", "constructor", "hasOwnProperty", "__proto__"]) {
+    const { wasm } = compiler.compile(`def f():\n    return ${name}()\n`, { filename: "h.star", noWasi: true, host: [{ name }] });
+    await assert.rejects(load(wasm), new RegExp(`imports host function "${name}", which config.host does not provide`), name);
+    await assert.rejects(load(wasm, { host: {} }), /does not provide/, name);
+    const host = Object.defineProperty({}, name, { value: () => `own ${name}`, enumerable: true });
+    assert.equal((await load(wasm, { host })).call("f"), `own ${name}`, name);
+  }
 });

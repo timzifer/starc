@@ -544,7 +544,9 @@ export class Module {
     const out = cfg.stdout ?? (() => {});
     const err = cfg.stderr ?? (() => {});
     const host = cfg.host ?? {};
-    const imports = { wasi_snapshot_preview1: {}, starc_host: {} };
+    // Without prototypes, an import named like an Object.prototype property
+    // (such as "__proto__") is an ordinary entry.
+    const imports = { wasi_snapshot_preview1: Object.create(null), starc_host: Object.create(null) };
     const mem = () => new Uint8Array(this._exports.memory.buffer);
     const view = () => new DataView(this._exports.memory.buffer);
     const read = (ptr, n) => {
@@ -596,7 +598,9 @@ export class Module {
         } else if (imp.name === "starc_dbg") {
           imports.starc_host.starc_dbg = (arg) => this._debugStop(arg);
         } else {
-          const fn = host[imp.name];
+          // Only own properties: an inherited one such as toString is not a
+          // host function the embedder provides.
+          const fn = Object.hasOwn(host, imp.name) ? host[imp.name] : undefined;
           if (typeof fn !== "function") {
             throw new Error(`starc: module imports host function "${imp.name}", which config.host does not provide`);
           }
