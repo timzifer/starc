@@ -275,6 +275,9 @@ which maps functions and positions to the source (see
 
 ## Example: JavaScript host
 
+`js/host.mjs` implements all of this (see [js.md](js.md)); the example
+below shows the bare protocol.
+
 ```js
 import { readFile } from "node:fs/promises";
 import { WASI } from "node:wasi";

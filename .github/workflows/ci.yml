@@ -110,3 +110,27 @@ jobs:
         with:
           version: "~> v2"
           args: check
+
+  # The compiler built for JavaScript and the JavaScript host must give
+  # the same modules, results and fuel as the native compiler and the Go
+  # host (see docs/js.md).
+  js:
+    name: JavaScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Build the compiler for JavaScript
+        run: GOOS=js GOARCH=wasm go build -trimpath -ldflags="-s -w" -o js/testdata/starc.wasm ./cmd/starc-js
+      - name: Size of the compiler
+        run: |
+          echo "starc.wasm: $(wc -c < js/testdata/starc.wasm) bytes, $(gzip -9 -c js/testdata/starc.wasm | wc -c) gzipped" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Write the expectations with the Go compiler and host
+        run: go run ./internal/cmd/jsfixtures > js/testdata/parity.json
+      - name: Test
+        run: node --test js/test/host.test.mjs js/test/parity.test.mjs

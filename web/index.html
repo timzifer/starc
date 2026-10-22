@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>starc playground</title>
+<meta name="description" content="Compile Starlark to WebAssembly and run it in your browser, with deterministic fuel metering.">
+<link rel="stylesheet" href="style.css">
+<script src="wasm_exec.js"></script>
+<script type="module" src="app.mjs"></script>
+</head>
+<body>
+<header>
+  <h1>starc <span>playground</span></h1>
+  <p>Starlark compiled to WebAssembly by the compiler itself running as WebAssembly in your browser.
+  Nothing is sent to a server; the module, its results and its fuel are the same as on a server.
+  <a href="https://github.com/timzifer/starc">GitHub</a> ·
+  <a href="https://github.com/timzifer/starc/blob/main/docs/js.md">JavaScript API</a></p>
+</header>
+
+<main>
+  <section class="editor">
+    <div class="bar">
+      <label>Example
+        <select id="example"></select>
+      </label>
+      <span id="status" class="status">Loading the compiler…</span>
+    </div>
+    <div class="code">
+      <pre id="gutter" aria-hidden="true"></pre>
+      <textarea id="source" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Starlark source"></textarea>
+    </div>
+    <ul id="diagnostics" class="diagnostics" aria-live="polite"></ul>
+  </section>
+
+  <section class="run">
+    <div class="controls">
+      <label>Function
+        <select id="function"><option value="">(top level only)</option></select>
+      </label>
+      <label class="grow">Arguments (JSON array)
+        <input id="args" value="[]" spellcheck="false">
+      </label>
+      <label>Fuel budget
+        <input id="budget" type="number" min="1" value="1000000">
+      </label>
+      <button id="run" disabled>Run <kbd>Ctrl</kbd>+<kbd>Enter</kbd></button>
+    </div>
+
+    <dl class="summary">
+      <div><dt>Result</dt><dd id="result">–</dd></div>
+      <div><dt>Fuel</dt><dd id="fuel">–</dd></div>
+      <div><dt>Module</dt><dd id="module">–</dd></div>
+    </dl>
+
+    <h2>Output</h2>
+    <pre id="output" class="output"></pre>
+
+    <h2>Fuel profile</h2>
+    <table id="profile" class="profile">
+      <thead><tr><th>function</th><th>fuel</th><th>%</th><th>calls</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+
+<footer>
+  <span id="version"></span>
+</footer>
+</body>
+</html>

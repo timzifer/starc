@@ -125,11 +125,20 @@ func NewDict(kv ...any) *Dict {
 	return d
 }
 
-// Len returns the number of entries.
-func (d *Dict) Len() int { return len(d.Entries) }
+// Len returns the number of entries; a nil Dict is empty.
+func (d *Dict) Len() int {
+	if d == nil {
+		return 0
+	}
+	return len(d.Entries)
+}
 
-// Get returns the value for key.
+// Get returns the value for key; a nil Dict is empty, like the kwargs of
+// a host function called without keyword arguments.
 func (d *Dict) Get(key any) (any, bool) {
+	if d == nil {
+		return nil, false
+	}
 	for _, e := range d.Entries {
 		if reflect.DeepEqual(e.Key, key) {
 			return e.Value, true

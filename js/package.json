@@ -1,0 +1,16 @@
+{
+  "name": "starc",
+  "private": true,
+  "description": "Run starc modules and the starc compiler in JavaScript",
+  "type": "module",
+  "exports": {
+    "./host": "./host.mjs",
+    "./compiler": "./compiler.mjs"
+  },
+  "types": "./index.d.ts",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/host.test.mjs test/parity.test.mjs"
+  }
+}
