@@ -33,6 +33,14 @@ test("values round-trip", () => {
   assert.deepEqual(decodeCall(encodeCall([], {})), { args: [], kwargs: null });
 });
 
+test("a leading U+FEFF is part of a string", () => {
+  const s = "\ufeffhello";
+  assert.equal(decode(encode(s)), s);
+  assert.deepEqual(decode(encode(new Map([[s, 1]]))), new Map([[s, 1]]));
+  assert.deepEqual([...decode(encode(new Struct({ [s]: 1 }))).fields.keys()], [s]);
+  assert.deepEqual(decode(new Uint8Array([5, 3, 0, 0, 0, 0xef, 0xbb, 0xbf])), "\ufeff");
+});
+
 test("calls with JavaScript values", async () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const goroot = execFileSync("go", ["env", "GOROOT"], { encoding: "utf8" }).trim();
@@ -56,6 +64,15 @@ test("calls with JavaScript values", async () => {
   });
   assert.equal(m.call("greet", "again"), "hello again!", "usable after an error");
   assert.throws(() => m.call("nope"), /exports no function/);
+
+  // A leading U+FEFF is part of results and output (issue #48).
+  let printed = "";
+  const echo = await load(compiler.compile('print("\ufeffhi")\n\ndef echo(x):\n    return x\n', { filename: "echo.star" }).wasm, {
+    stdout: (s) => (printed += s),
+  });
+  assert.equal(printed, "\ufeffhi\n");
+  assert.equal(echo.call("echo", "\ufeffhello"), "\ufeffhello");
+  assert.deepEqual(echo.call("echo", new Map([["\ufeffk", 1]])), new Map([["\ufeffk", 1]]));
 
   const res = compiler.compile("x = (", { filename: "e.star" });
   assert.equal(res.wasm, null);

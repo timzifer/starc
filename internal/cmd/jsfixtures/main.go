@@ -77,6 +77,8 @@ var cases = []testCase{
 	{Name: "wordcount", File: "examples/wordcount.star", Options: jsapi.Options{Fuel: true},
 		Calls: []call{{Fn: "count_words", Args: []any{"b a b. c, A b", int64(2)}}}},
 	{Name: "values", Options: jsapi.Options{Fuel: true, Struct: true, Dialect: jsapi.Dialect{Set: true}}, Src: `
+print("\ufeffvalues")
+
 def echo(*args, **kwargs):
     return [args, kwargs]
 

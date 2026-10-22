@@ -52,7 +52,8 @@ export class Float {
 const TAG = { none: 0, false: 1, true: 2, int: 3, float: 4, string: 5, list: 6, tuple: 7, dict: 8, struct: 9, opaque: 10 };
 const MAX_DEPTH = 1000;
 const encoder = new TextEncoder();
-const decoder = new TextDecoder("utf-8", { fatal: false });
+// A leading U+FEFF is part of the string, not a byte order mark.
+const decoder = new TextDecoder("utf-8", { fatal: false, ignoreBOM: true });
 
 class Writer {
   constructor() {
