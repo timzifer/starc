@@ -267,14 +267,30 @@ func (r *RT) registerBuiltins() {
 			r.Call("range_new", get(a), get(b), get(s)),
 		)
 	})
+	// hash(s) is go.starlark.net's javaStringHash: h = 31*h + c over the
+	// code points of s, with U+FFFD for each invalid byte. Like the
+	// reference, it adds code points above U+FFFF whole rather than as
+	// UTF-16 surrogates.
 	r.builtin("hash", func(f *Func, args, kw Local) {
-		s, i, h := f.Local(I32), f.Local(I32), f.Local(I32)
+		s, i, c, w, h := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
+		brk, cont := NewLabel(), NewLabel()
 		f.Add(
 			r.checkArgs("hash", args, kw, 1, 1),
 			Set(s, arg(args, 0)),
 			If(not(isTag(get(s), TString)), r.Fail("hash: got ", r.TypeName(get(s)), ", want string")),
-			r.forRange(i, c32(0), slen(get(s)),
-				Set(h, add(mul(get(h), c32(31)), I32Load8U(add(sbytes(get(s)), get(i)), 0)))),
+			Block(brk, r.loop(cont,
+				BrIf(brk, ge(get(i), slen(get(s)))),
+				Set(c, I32Load8U(add(sbytes(get(s)), get(i)), 0)),
+				Set(w, c32(1)),
+				If(I32GeU(get(c), c32(0x80)), Seq{
+					Set(c, r.Call("utf8_decode", add(sbytes(get(s)), get(i)), sub(slen(get(s)), get(i)))),
+					Set(w, I32ShrU(get(c), c32(runeShift))),
+					Set(c, and(get(c), c32(1<<runeShift-1))),
+				}),
+				Set(h, add(mul(get(h), c32(31)), get(c))),
+				Set(i, add(get(i), get(w))),
+				Br(cont),
+			)),
 			r.Call("int", I64ExtendI32S(get(h))),
 		)
 	})

@@ -101,6 +101,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
   U+00A0 or U+2028) as `\u`/`\U` escapes, and bytes that are not valid
   UTF-8 as `\x` escapes, so the result is always valid UTF-8. Printable
   means `strconv.IsPrint` of the Go release that builds starc.
+* `hash` of strings with non-ASCII characters matches go.starlark.net:
+  it combines code points rather than UTF-8 bytes.
 
 ## [0.1.1] - 2026-10-20
 
