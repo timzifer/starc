@@ -42,3 +42,11 @@ print("\u00e9a\u00e8".strip("\u00e8"), repr("\u00e9".strip("\u00e8")), "x\u2713y
 bad = "\u00e9"[:1]
 print(repr((bad + "a" + bad).strip(bad)), repr((bad + "a").lstrip("\ufffd")), repr(("a" + bad).rstrip("b" + bad)))
 print(repr("\ufffda\ufffd".strip(bad)), "aXbXa".strip("ab"), "  x  ".strip(" "), repr("\u00e9\u00e9".lstrip("\u00e9")))
+---
+# codepoints, codepoint_ords and ord decode invalid bytes as U+FFFD.
+b = "\u00e9"[:1]
+t = "a" + b + "\U0001f600"[:3] + "z\u00e9\u2713"[:5] + "\u00e9"[1:]
+print(list(b.codepoints()), list(b.codepoint_ords()), list(t.codepoints()), list(t.codepoint_ords()))
+print(ord(b), ord("\u00e9"[1:]), ord("\ufffd"), ord("\U0010ffff"), [ord(c) for c in t.codepoints()])
+---
+ord("\u00e9" + "\u00e9"[1:])
