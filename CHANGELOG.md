@@ -112,6 +112,10 @@ and the project follows [Semantic Versioning](https://semver.org/).
 * `strip("")`, `lstrip("")` and `rstrip("")` strip whitespace like the
   methods without argument, and `None` as the argument is an error, as
   in go.starlark.net.
+* `split()`, `rsplit()`, `strip()`, `lstrip()` and `rstrip()` without
+  separator recognize Unicode white space (`unicode.IsSpace`, such as
+  U+00A0 and U+3000), and stripping a cutset works on code points rather
+  than bytes, as in go.starlark.net.
 
 ## [0.1.1] - 2026-10-20
 
