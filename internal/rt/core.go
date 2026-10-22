@@ -75,7 +75,7 @@ const (
 
 	offBiTable = 4
 	offBiName  = 8
-	sizeBi     = 12
+	sizeBi     = 16 // offBiProf at 12
 
 	offBoundFn   = 4
 	offBoundRecv = 8
@@ -161,6 +161,9 @@ type Config struct {
 	Backtrace bool
 	// Filename is the name of the source file in backtraces.
 	Filename string
+	// Profile attributes fuel to functions (see profile.go). It requires
+	// Fuel and Backtrace.
+	Profile bool
 }
 
 // RT is the runtime library for one module.
@@ -194,6 +197,13 @@ type RT struct {
 	posList    [][2]int
 	posTab     uint32 // static table of (line, col) by position id
 	digits     uint32 // static string for writing numbers
+
+	// Fuel profile (see profile.go).
+	ProfCur     *Global // 1-based entry that the fuel is attributed to
+	ProfLast    *Global // fuel at the last flush (i64)
+	ProfPrelude *Global // whether the current entry is a prelude function
+	profEntries []ProfileEntry
+	profTab     uint32
 
 	None, False, True uint32
 
@@ -273,6 +283,7 @@ func New(m *Module, cfg Config) *RT {
 	r.initFuel()
 	r.initLimits()
 	r.initBacktrace()
+	r.initProfile()
 	r.registerCore()
 	r.registerNum()
 	r.registerStr()
@@ -337,6 +348,7 @@ func (r *RT) Finish() *Func {
 	f.Add(r.methodInit...)
 	f.Add(r.initFrames())
 	r.layoutPositions()
+	r.layoutProfile()
 	end := (r.M.DataEnd() + 7) &^ 7
 	r.Heap.Init = int64(end)
 	r.HeapMark.Init = int64(end)
@@ -410,6 +422,7 @@ func (r *RT) Builtin(name string, f *Func) uint32 {
 	a := r.M.Static(sizeBi, 8)
 	r.M.PutU32(a, TBuiltin|1<<8)
 	r.M.PutU32(a+offBiName, r.Str(name))
+	r.profileBuiltin(a, name, ProfBuiltin)
 	r.fixups = append(r.fixups, I32Store(addr(a), offBiTable, TableIndex(f)))
 	r.builtins[key] = a
 	return a
@@ -604,6 +617,8 @@ func (r *RT) registerCore() {
 	r.define("fail", p1, r0, func(f *Func) {
 		msg := f.Param(0)
 		f.Add(GSet(r.ErrObj, get(msg)))
+		// The fuel up to the error counts toward the failing function.
+		f.Add(r.ProfileEnd())
 		if r.Cfg.Backtrace {
 			f.Add(r.Call("bt_collect"), GSet(r.DupKw, c32(0)))
 		}

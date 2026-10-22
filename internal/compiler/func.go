@@ -115,8 +115,12 @@ func (fc *fcomp) function(fn *resolve.Function, outer *fcomp) Expr {
 		flags |= rt.SpecPrelude
 	}
 	spec := r.Spec(fn.Name, names, fn.NumKwonlyParams, flags)
-	if show := preludeShow(fn.Name); fc.u.prelude && show != "" {
+	if !fc.u.prelude {
+		r.ProfileFunction(spec, rt.ProfileEntry{Name: fn.Name, Kind: rt.ProfFunction,
+			Line: int(fn.Pos.Line), Col: int(fn.Pos.Col), Wasm: f.Name})
+	} else if show := preludeShow(fn.Name); show != "" {
 		r.SpecShow(spec, show)
+		r.ProfileFunction(spec, rt.ProfileEntry{Name: show, Kind: rt.ProfBuiltin})
 	}
 	nparams := len(names)
 	if fn.HasVarargs {

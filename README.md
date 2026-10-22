@@ -147,6 +147,10 @@ left, _ := m.Fuel(ctx)
 
 See [docs/fuel.md](docs/fuel.md) for the cost table.
 
+With `Options.Profile` (`starc run -profile`), the module also records
+the fuel used by each function, without changing its fuel consumption;
+`host.Module.Profile` reads it. See [docs/debug.md](docs/debug.md).
+
 Hard limits complete the sandbox: memory (`MaxMemoryPages`), call depth
 (`MaxCallDepth`, 500 by default) and the size of arguments and results
 (`MaxInputBytes`, `MaxResultBytes`). Exceeding one is a defined error

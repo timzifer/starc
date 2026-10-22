@@ -239,6 +239,11 @@ type Module struct {
 	fuelGet api.Function
 	exports map[string]api.Function
 	busy    bool // a call is in progress
+
+	debug     *DebugInfo // starc.debug, nil if absent
+	profFuel  api.Function
+	profCalls api.Function
+	profReset api.Function
 }
 
 // ReadMeta extracts the starc.meta custom section from a module binary.
@@ -300,6 +305,9 @@ func Load(ctx context.Context, wasm []byte, cfg *Config) (*Module, error) {
 		return fail(err)
 	}
 	m.meta = *meta
+	if m.debug, err = debugOf(cm); err != nil {
+		return fail(err)
+	}
 	if m.hostMod, err = instantiateHost(ctx, m.rt, cm, cfg); err != nil {
 		return fail(err)
 	}
@@ -333,6 +341,7 @@ func Load(ctx context.Context, wasm []byte, cfg *Config) (*Module, error) {
 	m.mod = mod
 	m.fuelSet = mod.ExportedFunction("starc_fuel_set")
 	m.fuelGet = mod.ExportedFunction("starc_fuel")
+	m.initProfile(mod)
 	if cfg.InitFuel != 0 {
 		if err := m.SetFuel(ctx, cfg.InitFuel); err != nil {
 			_ = mod.Close(ctx)

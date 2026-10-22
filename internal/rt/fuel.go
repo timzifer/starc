@@ -68,6 +68,15 @@ func (r *RT) initFuel() {
 	})
 	// fuel_set(n): sets the remaining budget.
 	r.define("fuel_set", pi, r0, func(f *Func) {
+		if r.Cfg.Profile {
+			// Lowering the budget during a call is a charge by a host
+			// function, which the profile attributes to it; otherwise
+			// the host sets a new budget.
+			f.Add(If(or(eqz(GGet(r.ProfCur)), I64GtS(get(f.Param(0)), GGet(r.Fuel))), Seq{
+				r.Call("prof_flush"),
+				GSet(r.ProfLast, get(f.Param(0))),
+			}))
+		}
 		f.Add(GSet(r.Fuel, get(f.Param(0))))
 	})
 	// fuel_get() -> remaining budget

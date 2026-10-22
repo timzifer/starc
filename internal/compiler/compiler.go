@@ -58,6 +58,9 @@ type Options struct {
 	// NoBacktrace omits source positions and the shadow call stack:
 	// errors carry only their message.
 	NoBacktrace bool
+	// Profile attributes fuel to functions; it requires Fuel and
+	// backtraces.
+	Profile bool
 }
 
 // Error is a compilation error at a source position.
@@ -88,7 +91,12 @@ const (
 	ExportFrames    = "starc_frames"
 	ExportFrame     = "starc_frame"
 	ExportFramePos  = "starc_frame_pos"
+	ExportProfile   = "starc_profile"       // () -> number of entries
+	ExportProfFuel  = "starc_profile_fuel"  // (i) -> fuel of entry i
+	ExportProfCalls = "starc_profile_calls" // (i) -> calls of entry i
+	ExportProfReset = "starc_profile_reset" // () clears the profile
 	MetaSection     = "starc.meta"
+	DebugSection    = "starc.debug"
 )
 
 // unit is one compiled source file (the prelude or the user program).
@@ -121,6 +129,9 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 	if opts.Command && opts.NoWASI {
 		return nil, errors.New("a command module requires WASI")
 	}
+	if opts.Profile && (!opts.Fuel || opts.NoBacktrace) {
+		return nil, errors.New("a profile requires fuel metering and backtraces")
+	}
 	host, err := hostTree(opts.Host)
 	if err != nil {
 		return nil, err
@@ -149,7 +160,7 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 	}
 	r := rt.New(m, rt.Config{Command: opts.Command, NoWASI: opts.NoWASI, Fuel: opts.Fuel, FiniteFloats: opts.FiniteFloats,
 		MaxCallDepth: opts.MaxCallDepth, MaxInputBytes: opts.MaxInputBytes, MaxResultBytes: opts.MaxResultBytes,
-		Backtrace: !opts.NoBacktrace, Filename: filename})
+		Backtrace: !opts.NoBacktrace, Filename: filename, Profile: opts.Profile})
 	c.m, c.r = m, r
 
 	preludeUniverse := func(name string) bool {
@@ -292,11 +303,16 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		getF.Add(r.Call("fuel_get"))
 		m.Export(ExportFuel, getF)
 	}
+	if opts.Profile {
+		c.profileExports()
+	}
 
 	r.LayoutMethods()
 	static := r.Finish()
+	initF.Add(r.ProfileStart(I32c(0)))
 	initF.Add(Call(static))
 	initF.Add(initBody...)
+	initF.Add(r.ProfileEnd())
 
 	hostFuncs := append([]string{}, r.HostFuncs()...)
 	sort.Strings(hostFuncs)
@@ -315,6 +331,9 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 			InputBytes: int(opts.MaxInputBytes), ResultBytes: int(opts.MaxResultBytes)}, opts.FiniteFloats,
 		map[bool]string{false: filename}[opts.NoBacktrace]})
 	m.Customs = append(m.Customs, Custom{Name: MetaSection, Payload: payload})
+	if opts.Profile {
+		m.Customs = append(m.Customs, Custom{Name: DebugSection, Payload: c.debugSection(filename)})
+	}
 
 	return m.Encode()
 }
@@ -403,7 +422,8 @@ func (c *compiler) checkSupported(file *syntax.File) {
 
 func (c *compiler) exportList() ([]string, error) {
 	reserved := map[string]bool{"memory": true, "_initialize": true, "_start": true, ExportAlloc: true, ExportError: true,
-		ExportErrorCode: true, ExportFuelSet: true, ExportFuel: true, ExportFrames: true, ExportFrame: true, ExportFramePos: true}
+		ExportErrorCode: true, ExportFuelSet: true, ExportFuel: true, ExportFrames: true, ExportFrame: true, ExportFramePos: true,
+		ExportProfile: true, ExportProfFuel: true, ExportProfCalls: true, ExportProfReset: true}
 	if c.opts.Exports == nil {
 		var names []string
 		for _, stmt := range c.user.file.Stmts {
@@ -478,9 +498,20 @@ func (c *compiler) exportWrapper(name string) *Func {
 		GSet(r.Depth, I32c(0)),
 		r.ResetFrames(),
 		Set(fn, GGet(c.user.byName[name])),
+		// Decoding and encoding count toward the exported function.
+		r.ProfileStart(Get(fn)),
 		Set(kw, r.Call("alloc", I32c(4))),
 		Set(args, r.Call("abi_args", Get(ptr), Get(n), Get(kw))),
-		r.Call("abi_result", r.Call("call", Get(fn), Get(args), I32Load(Get(kw), 0))),
+	)
+	if !c.opts.Profile {
+		f.Add(r.Call("abi_result", r.Call("call", Get(fn), Get(args), I32Load(Get(kw), 0))))
+		return f
+	}
+	res := f.Local(I64)
+	f.Add(
+		Set(res, r.Call("abi_result", r.Call("call", Get(fn), Get(args), I32Load(Get(kw), 0)))),
+		r.ProfileEnd(),
+		Get(res),
 	)
 	return f
 }

@@ -21,7 +21,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/timzifer/starc"
 	"github.com/timzifer/starc/abi"
@@ -99,6 +101,7 @@ type buildOpts struct {
 	finite  bool
 	structs bool
 	noBT    bool
+	profile bool
 	budget  int64
 	limits  struct {
 		pages, input, result uint
@@ -126,6 +129,7 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 	fs.BoolVar(&o.finite, "finite-floats", false, "make NaN and infinite floats errors")
 	fs.BoolVar(&o.structs, "struct", false, "provide the struct builtin")
 	fs.BoolVar(&o.noBT, "no-backtrace", false, "omit source positions and call stacks of run-time errors")
+	fs.BoolVar(&o.profile, "profile", false, "record the fuel used by each function (implies -fuel; run: print the profile)")
 	fs.BoolVar(&o.dialect.While, "while", false, "allow while loops")
 	fs.BoolVar(&o.dialect.TopLevelControl, "toplevel-control", false, "allow if/for/while at top level")
 	fs.BoolVar(&o.dialect.GlobalReassign, "global-reassign", false, "allow reassignment of top-level names")
@@ -139,7 +143,7 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 }
 
 func (o *buildOpts) options() *starc.Options {
-	opts := &starc.Options{NoNames: o.noNames, NoWASI: o.noWASI, Fuel: o.fuel || o.budget > 0, FiniteFloats: o.finite, Struct: o.structs, Dialect: o.dialect,
+	opts := &starc.Options{NoNames: o.noNames, NoWASI: o.noWASI, Fuel: o.fuel || o.budget > 0 || o.profile, Profile: o.profile, FiniteFloats: o.finite, Struct: o.structs, Dialect: o.dialect,
 		NoBacktrace: o.noBT, MaxMemoryPages: uint32(min(o.limits.pages, 1<<32-1)), MaxCallDepth: o.limits.depth,
 		MaxInputBytes: uint32(min(o.limits.input, 1<<32-1)), MaxResultBytes: uint32(min(o.limits.result, 1<<32-1))}
 	if o.command {
@@ -245,9 +249,10 @@ func runCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		wasm, err = os.ReadFile(in)
 	} else {
 		opts := o.options()
-		if fs.NArg() == 1 && !o.command && !o.noWASI {
+		if fs.NArg() == 1 && !o.command && !o.noWASI && !o.profile {
 			// Without a function to call, run the program as a command so
-			// that errors are reported on stderr with a non-zero status.
+			// that errors are reported on stderr with a non-zero status
+			// (unless the profile is to be read after it).
 			opts.ExecModel = starc.Command
 		}
 		wasm, err = compileInput(in, stdin, opts)
@@ -275,8 +280,11 @@ func runCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	defer m.Close(ctx)
 	// reportFuel prints the fuel used since the budget was set.
 	reportFuel := func() {
-		if rest, err := m.Fuel(ctx); err == nil && (o.fuel || o.budget > 0) {
+		if rest, err := m.Fuel(ctx); err == nil && (o.fuel || o.budget > 0 || o.profile) {
 			fmt.Fprintf(stderr, "fuel used: %d\n", budget-rest)
+		}
+		if o.profile {
+			printProfile(ctx, m, stderr)
 		}
 	}
 	if fs.NArg() == 1 {
@@ -296,6 +304,12 @@ func runCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			return 2
 		}
 		callArgs = append(callArgs, v)
+	}
+	if o.profile {
+		// Like the fuel, the profile covers the call only.
+		if err := m.ResetProfile(ctx); err != nil {
+			return report(stderr, err)
+		}
 	}
 	res, err := m.Call(ctx, fs.Arg(1), callArgs...)
 	reportFuel()
@@ -388,4 +402,36 @@ func toJSON(v any) any {
 		return pairs
 	}
 	return v
+}
+
+// printProfile writes the fuel profile of m, the functions that used the
+// most fuel first.
+func printProfile(ctx context.Context, m *host.Module, w io.Writer) {
+	prof, err := m.Profile(ctx)
+	if err != nil {
+		fmt.Fprintln(w, "starc:", err)
+		return
+	}
+	sort.SliceStable(prof, func(i, j int) bool { return prof[i].Fuel > prof[j].Fuel })
+	var total int64
+	for _, e := range prof {
+		total += e.Fuel
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "fuel\t%\tcalls\tfunction")
+	for _, e := range prof {
+		if e.Fuel == 0 && e.Calls == 0 {
+			continue
+		}
+		pct := 0.0
+		if total > 0 {
+			pct = 100 * float64(e.Fuel) / float64(total)
+		}
+		name := e.Name
+		if e.Pos.Line != 0 {
+			name += "  " + e.Pos.String()
+		}
+		fmt.Fprintf(tw, "%d\t%.1f\t%d\t%s\n", e.Fuel, pct, e.Calls, name)
+	}
+	_ = tw.Flush()
 }
