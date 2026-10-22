@@ -153,7 +153,7 @@ func TestProfile(t *testing.T) {
 func TestProfileDebugInfo(t *testing.T) {
 	m := profModule(t, true)
 	d := m.DebugInfo()
-	if d == nil || d.Version != 1 || d.File != "prof.star" || len(d.Positions) < 10 || d.Positions[0] != [2]int{0, 0} {
+	if d == nil || d.Version != 1 || d.File != "prof.star" || len(d.Positions) < 10 || d.Positions[0] != [3]int{0, 0, 0} || len(d.Files) != 1 {
 		t.Fatalf("debug info: %+v", d)
 	}
 	found := false

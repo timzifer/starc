@@ -109,7 +109,7 @@ func (r *RT) initDebug() {
 		fn, s := f.Local(I32), f.Local(I32)
 		f.Add(
 			Set(fn, r.Call("dbg_frame_fn", get(f.Param(0)))),
-			If(eq(get(fn), c32(-1)), Return(I64c(0))),
+			If(or(eq(get(fn), c32(-1)), ne(and(get(fn), c32(btLoad)), c32(0))), Return(I64c(0))),
 			Set(s, IfV(I32, eqz(get(fn)), r.S("<toplevel>"), r.Call("callable_name", get(fn)))),
 			// A prelude function appears as the built-in it implements.
 			If(eq(r.Call("dbg_frame_kind", get(f.Param(0))), c32(2)), Set(s, ld(ld(get(fn), offFnSpec), offSpecShow))),
@@ -123,6 +123,7 @@ func (r *RT) initDebug() {
 		fn := f.Local(I32)
 		f.Add(
 			Set(fn, r.Call("dbg_frame_fn", get(f.Param(0)))),
+			If(and(get(fn), c32(btLoad)), Return(c32(3))),
 			If(le(get(fn), c32(0)), Return(get(fn))),
 			If(isTag(get(fn), TBuiltin), Return(c32(1))),
 			If(eqz(and(ld(ld(get(fn), offFnSpec), offSpecFlags), c32(SpecPrelude))), Return(c32(0))),
@@ -142,10 +143,17 @@ func (r *RT) initDebug() {
 	})
 	// dbg_desc(i) -> debug descriptor of frame i, or 0
 	r.define("dbg_desc", p1, r1, func(f *Func) {
-		fn := f.Local(I32)
+		fn, prev := f.Local(I32), f.Local(I32)
 		f.Add(
 			Set(fn, r.Call("dbg_frame_fn", get(f.Param(0)))),
-			If(eqz(get(fn)), Return(Raw(func() Expr { return addr(r.dbgTop) }))),
+			// The top level of a loaded module follows the frame of its load
+			// statement, which holds its descriptor.
+			If(eqz(get(fn)), Seq{
+				If(and(ne(get(f.Param(0)), c32(0)), ne(and(Tee(prev, r.Call("dbg_frame_fn", sub(get(f.Param(0)), c32(1)))), c32(btLoad)), c32(0))),
+					Return(and(get(prev), c32(-8)))),
+				Return(Raw(func() Expr { return addr(r.dbgTop) })),
+			}),
+			If(ne(and(get(fn), c32(btLoad)), c32(0)), Return(c32(0))),
 			If(or(eq(get(fn), c32(-1)), not(isTag(get(fn), TFunction))), Return(c32(0))),
 			ld(ld(get(fn), offFnSpec), offSpecDbg),
 		)
@@ -215,7 +223,7 @@ func (r *RT) dbgBreak(pos Expr) Expr {
 // DebugDescriptor creates the static descriptor of a function's local
 // variables: their number, then a (name, cell) pair per variable.
 func (r *RT) DebugDescriptor(names []string, cells []bool) uint32 {
-	d := r.M.Static(4+8*len(names), 4)
+	d := r.M.Static(4+8*len(names), 8) // 8-aligned: see LoadEnter
 	r.M.PutU32(d, uint32(len(names)))
 	for i, n := range names {
 		r.M.PutU32(d+4+uint32(8*i), r.Str(n))

@@ -46,7 +46,7 @@ func (fc *fcomp) here() Expr {
 	if fc.u.prelude {
 		return Nop()
 	}
-	return fc.c.r.SetPos(fc.c.r.Pos(int(fc.pos.Line), int(fc.pos.Col)))
+	return fc.c.r.SetPos(fc.c.r.Pos(fc.pos.Filename(), int(fc.pos.Line), int(fc.pos.Col)))
 }
 
 // at sets the position to p and yields code that records it.
@@ -73,7 +73,11 @@ func (c *compiler) compileToplevel(u *unit) *Func {
 		}
 	}
 	if d := fc.debugVars(mod.Locals, nil); d != 0 {
-		c.r.DebugToplevel(d)
+		if u.module != "" {
+			u.dbgDesc = d
+		} else {
+			c.r.DebugToplevel(d)
+		}
 	}
 	if !u.prelude {
 		f.Add(c.r.PushToplevel())
@@ -123,7 +127,7 @@ func (fc *fcomp) function(fn *resolve.Function, outer *fcomp) Expr {
 	}
 	spec := r.Spec(fn.Name, names, fn.NumKwonlyParams, flags)
 	if !fc.u.prelude {
-		r.ProfileFunction(spec, rt.ProfileEntry{Name: fn.Name, Kind: rt.ProfFunction,
+		r.ProfileFunction(spec, rt.ProfileEntry{Name: fn.Name, Kind: rt.ProfFunction, File: fn.Pos.Filename(),
 			Line: int(fn.Pos.Line), Col: int(fn.Pos.Col), Wasm: f.Name})
 	} else if show := preludeShow(fn.Name); show != "" {
 		r.SpecShow(spec, show)
@@ -252,7 +256,7 @@ func (fc *fcomp) block(stmts []syntax.Stmt, extra int64) []Expr {
 			for i, l := range fc.dbgVars {
 				vars[i] = Get(l)
 			}
-			out = append(out, fc.c.r.DebugStatement(fc.c.r.Pos(int(start.Line), int(start.Col)), fc.dbgArea, vars))
+			out = append(out, fc.c.r.DebugStatement(fc.c.r.Pos(start.Filename(), int(start.Line), int(start.Col)), fc.dbgArea, vars))
 		}
 		out = append(out, fc.stmt(s))
 	}
@@ -264,7 +268,13 @@ func (fc *fcomp) block(stmts []syntax.Stmt, extra int64) []Expr {
 // does not depend on the size of the prelude).
 func (fc *fcomp) dropped(s syntax.Stmt) bool {
 	d, ok := s.(*syntax.DefStmt)
-	return ok && fc.u.prelude && fc.c.reach != nil && !fc.c.reach.defs[d.Name.Name]
+	if !ok || fc.c.reach == nil {
+		return false
+	}
+	if fc.u.module != "" {
+		return !fc.c.reach.moduleDefUsed(fc.u, d.Name.Name)
+	}
+	return fc.u.prelude && !fc.c.reach.defs[d.Name.Name]
 }
 
 func (fc *fcomp) stmt(s syntax.Stmt) Expr {
@@ -358,8 +368,7 @@ func (fc *fcomp) stmt(s syntax.Stmt) Expr {
 		return fc.assign(s.Name, fc.function(s.Function.(*resolve.Function), fc), s.Def)
 
 	case *syntax.LoadStmt:
-		fc.c.errorf(s.Load, "load statements are not supported")
-		return Nop()
+		return fc.load(s)
 	}
 	start, _ := s.Span()
 	fc.c.errorf(start, "unsupported statement %T", s)

@@ -76,6 +76,9 @@ type Meta struct {
 	// File is the name of the source file, for the positions of errors;
 	// it is omitted for a module built without backtraces.
 	File string `json:"file,omitempty"`
+	// Files lists the source files of a program that loads modules, the
+	// main file first; positions refer to them by index.
+	Files []string `json:"files,omitempty"`
 }
 
 // Limits are the hard limits of a module (see starc.Options).
@@ -606,7 +609,7 @@ func (m *Module) readFrames(ctx context.Context, e *Error) {
 		}
 		pos := Position{Filename: "<builtin>"}
 		if pr[0] != math.MaxUint64 {
-			pos = Position{Filename: m.meta.File, Line: int(uint32(pr[0])), Col: int(uint32(pr[0] >> 32))}
+			pos = decodePos(m.meta.Files, m.meta.File, pr[0])
 			e.Pos = pos
 		}
 		e.CallStack = append(e.CallStack, Frame{Name: string(name), Pos: pos})

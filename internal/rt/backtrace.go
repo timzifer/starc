@@ -30,6 +30,12 @@ const btBuiltin = 1 << 31
 // 8-aligned).
 const btCallback = 1
 
+// btLoad marks the frame of a load statement that runs a module's
+// top-level code (bit 1; the rest is the module's debug descriptor or 0).
+// As in go.starlark.net, where the error of a loaded module becomes the
+// error of the load statement, the frames from there on are not shown.
+const btLoad = 2
+
 // Frame kinds while collecting.
 const (
 	btUser    = 0 // a function of the program, or its top level
@@ -59,7 +65,7 @@ func (r *RT) initBacktrace() {
 		k := f.Local(I32)
 		f.Add(Set(k, GGet(r.DupKw)), GSet(r.DupKw, c32(0)), get(k))
 	})
-	r.posIDs = map[[2]int]uint32{}
+	r.posIDs = map[[3]int]uint32{}
 	r.digits = r.M.Static(offStrBytes+16, 8)
 	r.M.PutU32(r.digits, TString|1<<8)
 
@@ -75,6 +81,7 @@ func (r *RT) initBacktrace() {
 			Block(brk, Loop(top,
 				BrIf(brk, I32GeU(get(p), GGet(r.SP))),
 				Set(fn, ld(get(p), 0)),
+				BrIf(brk, and(get(fn), c32(btLoad))),
 				Set(cb, and(get(fn), c32(btCallback))),
 				Set(fn, and(get(fn), c32(^btCallback))),
 				Set(kind, c32(btUser)),
@@ -165,14 +172,15 @@ func (r *RT) initBacktrace() {
 		e := f.Local(I32)
 		f.Add(
 			If(and(get(id), c32(btBuiltin)), Seq{Drop(r.Call("write", get(fd), r.S("<builtin>"))), Return(nil)}),
-			Drop(r.Call("write", get(fd), r.S(r.Cfg.Filename))),
 			Set(e, r.posEntry(get(id))),
+			Drop(r.Call("write", get(fd), ld(elem(Raw(func() Expr { return addr(r.fileTab) }), 0,
+				I32ShrU(ld(get(e), 4), c32(PosColBits))), 0))),
 			If(eqz(ld(get(e), 0)), Return(nil)),
 			Drop(r.Call("write", get(fd), r.S(":"))),
 			r.Call("write_u32", get(fd), ld(get(e), 0)),
-			If(eqz(ld(get(e), 4)), Return(nil)),
+			If(eqz(and(ld(get(e), 4), c32(posColMask))), Return(nil)),
 			Drop(r.Call("write", get(fd), r.S(":"))),
-			r.Call("write_u32", get(fd), ld(get(e), 4)),
+			r.Call("write_u32", get(fd), and(ld(get(e), 4), c32(posColMask))),
 		)
 	})
 	// write_backtrace(fd): writes the frames of the error and "Error: "
@@ -209,13 +217,20 @@ func (r *RT) initBacktrace() {
 	})
 }
 
-// Pos returns the position id of a source location; it is 0 without
-// backtraces.
-func (r *RT) Pos(line, col int) uint32 {
+// Position entries store the column in the low bits of their second word
+// and the index of the source file (see Files) above it.
+const (
+	PosColBits = 20
+	posColMask = 1<<PosColBits - 1
+)
+
+// Pos returns the position id of a source location in file; it is 0
+// without backtraces.
+func (r *RT) Pos(file string, line, col int) uint32 {
 	if !r.Cfg.Backtrace {
 		return 0
 	}
-	k := [2]int{line, col}
+	k := [3]int{line, min(col, posColMask), r.FileIndex(file)}
 	if id, ok := r.posIDs[k]; ok {
 		return id
 	}
@@ -238,7 +253,12 @@ func (r *RT) layoutPositions() {
 	r.posTab = r.M.Static(8*(len(r.posList)+1), 8)
 	for i, p := range r.posList {
 		r.M.PutU32(r.posTab+uint32(8*(i+1)), uint32(p[0]))
-		r.M.PutU32(r.posTab+uint32(8*(i+1))+4, uint32(p[1]))
+		r.M.PutU32(r.posTab+uint32(8*(i+1))+4, uint32(p[1]|p[2]<<PosColBits))
+	}
+	files := r.Files()
+	r.fileTab = r.M.Static(4*len(files), 4)
+	for i, name := range files {
+		r.M.PutU32(r.fileTab+uint32(4*i), r.Str(name))
 	}
 }
 
@@ -318,6 +338,40 @@ func (r *RT) callFrame(f *Func, call Expr, cb bool) Expr {
 	}
 }
 
-// Positions returns the source positions (line, col) by position id,
-// starting with id 1.
-func (r *RT) Positions() [][2]int { return r.posList }
+// Positions returns the source positions (line, col, file index) by
+// position id, starting with id 1.
+func (r *RT) Positions() [][3]int { return r.posList }
+
+// FileIndex returns the index of a source file in Files, adding it if new.
+func (r *RT) FileIndex(name string) int {
+	for i, f := range r.Files() {
+		if f == name {
+			return i
+		}
+	}
+	r.files = append(r.Files(), name)
+	return len(r.files) - 1
+}
+
+// Files lists the source files of positions; the first is the main file.
+func (r *RT) Files() []string {
+	if r.files == nil {
+		r.files = []string{r.Cfg.Filename}
+	}
+	return r.files
+}
+
+// LoadEnter yields code that enters the frame of a load statement at the
+// current position, for a module with the given debug descriptor (0
+// without one); PopFrame leaves it.
+func (r *RT) LoadEnter(desc uint32) Expr {
+	if !r.Cfg.Backtrace {
+		return Nop()
+	}
+	return Seq{
+		If(I32GeU(GGet(r.SP), GGet(r.StackLimit)), r.Call("depth_out")),
+		st(GGet(r.SP), 0, U32c(desc|btLoad)),
+		st(GGet(r.SP), 4, GGet(r.CurPos)),
+		GSet(r.SP, add(GGet(r.SP), c32(8))),
+	}
+}

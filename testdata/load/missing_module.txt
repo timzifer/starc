@@ -1,0 +1,4 @@
+Compile error.
+-- main.star --
+print("hi")
+load("nope.star", "x")

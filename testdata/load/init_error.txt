@@ -1,0 +1,12 @@
+An error while a loaded module initializes is an error of the load
+statement, as in go.starlark.net.
+-- main.star --
+print("before")
+x = 1
+load("bad.star", "y")
+print("not reached", y)
+-- bad.star --
+print("bad init")
+def f(a):
+    return a / 0
+y = f(1)

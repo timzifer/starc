@@ -1,0 +1,10 @@
+Compile error: A cycle in the load graph.
+-- main.star --
+load("a.star", "x")
+print(x)
+-- a.star --
+load("b.star", "y")
+x = y
+-- b.star --
+load("a.star", "x")
+y = 1

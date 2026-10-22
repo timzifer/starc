@@ -24,7 +24,8 @@ list and dict comprehensions, `%` string formatting, dict union `|`.
 targets), augmented assignment (`+=` extends lists and `|=` updates dicts in
 place), `if` / `elif` / `else`, `for`, `break`, `continue`, `pass`,
 `return`, `def` (default values, keyword-only parameters, `*args`,
-`**kwargs`) and nested functions with closures.
+`**kwargs`) and nested functions with closures, and `load` (see
+[Modules](#modules)).
 
 **Semantics:** values are frozen after module initialization; mutating a
 frozen value, or a list or dict while it is being iterated, is an error.
@@ -86,9 +87,31 @@ attributes and do not support ordering.
   `union`, `update`; operators `|`, `&`, `-`, `^` and the subset
   comparisons `<`, `<=`, `>`, `>=`
 
+## Modules
+
+`load(module, name, alias = "name", ...)` binds global values of another
+module in the loading file, as in go.starlark.net. The embedder provides
+the modules through `Options.Loader`, which receives the module name as
+written and returns its source; the compiler never reads files itself.
+`starc` (the command) loads files relative to the directory of the
+input file, or to `-load-dir`, and refuses names that leave it.
+
+All modules are compiled into one WebAssembly module. A module's
+top-level code runs when a `load` statement first reaches it, at most
+once, and its globals are frozen afterwards; the fuel it uses counts
+toward the top-level code of the program (`_initialize`). Functions of a
+loaded module that nothing uses are not compiled. An error in a loaded
+module's top-level code is reported at the `load` statement, as in
+go.starlark.net, and positions in backtraces name the file they are in.
+
+A cycle in the load graph, a module the loader cannot provide (or with
+syntax errors) and a name the module does not define are compile-time
+errors at the `load` statement; go.starlark.net reports them when the
+statement runs. A global that the module declares but did not assign is
+not exported, which fails when the `load` statement runs.
+
 ## Not supported (compile-time errors)
 
-* `load` statements
 * bytes literals and the `bytes` type
 * integer literals that do not fit in 64 bits
 

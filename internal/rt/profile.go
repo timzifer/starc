@@ -40,7 +40,8 @@ const (
 type ProfileEntry struct {
 	Name string
 	Kind ProfileKind
-	// Line and Col locate the def of a function of the program.
+	// File, Line and Col locate the def of a function of the program.
+	File      string
 	Line, Col int
 	// Wasm is the name of the WebAssembly function that implements a
 	// function of the program, as in the name section.

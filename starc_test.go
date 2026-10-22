@@ -61,7 +61,7 @@ func TestCompileErrors(t *testing.T) {
 	for _, c := range []struct{ src, want string }{
 		{"x = (", "x.star:1:6: got end of file, want primary expression"},
 		{"print(undefined)", "x.star:1:7: undefined: undefined"},
-		{"load('m', 'x')", "load statements are not supported"},
+		{"load('m', 'x')", "cannot load m: no loader"},
 		{"x = b'bytes'", "bytes literals are not supported"},
 		{"x = 123456789012345678901234567890", "big integers are not supported"},
 		{"s = set()", "undefined: set"},

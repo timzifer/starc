@@ -198,10 +198,12 @@ type RT struct {
 	StackLimit *Global // end of the shadow stack
 	ErrFrames  *Global // number of frames of the last error
 	DupKw      *Global // keyword passed twice to the pending call, or 0
-	posIDs     map[[2]int]uint32
-	posList    [][2]int
-	posTab     uint32 // static table of (line, col) by position id
-	digits     uint32 // static string for writing numbers
+	posIDs     map[[3]int]uint32
+	posList    [][3]int
+	files      []string // source files of positions (see Files)
+	fileTab    uint32   // static table of the file name strings
+	posTab     uint32   // static table of (line, col) by position id
+	digits     uint32   // static string for writing numbers
 
 	// Fuel profile (see profile.go).
 	ProfCur     *Global // 1-based entry that the fuel is attributed to

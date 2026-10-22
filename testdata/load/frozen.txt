@@ -1,0 +1,13 @@
+The globals of a loaded module are frozen once its top-level code ran.
+-- main.star --
+load("data.star", "ITEMS", "add")
+print(ITEMS)
+local = list(ITEMS)
+local.append(4)
+print(local)
+add(5)
+-- data.star --
+ITEMS = [1, 2, 3]
+ITEMS.append(4)
+def add(x):
+    ITEMS.append(x)

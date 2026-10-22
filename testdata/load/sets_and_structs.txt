@@ -1,0 +1,12 @@
+Values of every kind cross modules; equality and hashing work on them.
+-- main.star --
+load("v.star", "S", "T", "D", "F", "mk")
+print(S, T, D, F(2), mk(1) == mk(1), {mk(2): 1}[mk(2)])
+print(sorted(S | set([0])), T[1:], D.get("b"), hash("x"))
+-- v.star --
+S = set([3, 1, 2])
+T = (1, "two", 3.0, None, True)
+D = {"a": [1], "b": {"c": (2,)}}
+F = lambda x: x * 3
+def mk(n):
+    return struct(n = n, tag = "t")

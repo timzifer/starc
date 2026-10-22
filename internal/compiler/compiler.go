@@ -58,6 +58,9 @@ type Options struct {
 	// NoBacktrace omits source positions and the shadow call stack:
 	// errors carry only their message.
 	NoBacktrace bool
+	// Loader provides the modules that load statements name; without it,
+	// load statements are errors.
+	Loader Loader
 	// Profile attributes fuel to functions; it requires Fuel and
 	// backtraces.
 	Profile bool
@@ -111,6 +114,12 @@ type unit struct {
 	defs    map[string]*syntax.DefStmt
 	opts    *syntax.FileOptions
 	prelude bool
+
+	// Loaded modules (see load.go).
+	module   string  // the name that load statements use
+	initFn   *Func   // runs the top-level code once
+	initFlag *Global // whether the top-level code has run
+	dbgDesc  uint32  // debug descriptor of the top level
 }
 
 type compiler struct {
@@ -124,11 +133,15 @@ type compiler struct {
 	reach   *reach
 	nfunc   int
 	host    map[string]*hostNode // predeclared host names
+
+	universe func(name string) bool // predeclared names of the program
+	modules  map[string]*unit       // loaded modules by name
+	modOrder []*unit                // loaded modules, each after those it loads
 }
 
 // Compile compiles a Starlark file to a WebAssembly binary.
 func Compile(filename string, src []byte, opts Options) (out []byte, err error) {
-	c := &compiler{opts: opts}
+	c := &compiler{opts: opts, modules: map[string]*unit{}}
 	if opts.Command && opts.NoWASI {
 		return nil, errors.New("a command module requires WASI")
 	}
@@ -206,6 +219,7 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		}
 		return r.HasBuiltin(name)
 	}
+	c.universe = universe
 	if err := resolve.File(file, func(string) bool { return false }, universe); err != nil {
 		var el resolve.ErrorList
 		if errors.As(err, &el) {
@@ -219,6 +233,7 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 	}
 	c.user = c.newUnit("main", file, &dialect, false)
 	c.checkSupported(file)
+	c.loadModules(c.user, nil)
 	if len(c.errs) > 0 {
 		return nil, c.errs
 	}
@@ -253,6 +268,7 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 			}
 		}
 	}
+	c.compileModules()
 	uinit := c.compileToplevel(c.user)
 	initBody = append(initBody, Call(uinit))
 	// Freeze all globals and set the arena mark.
@@ -336,10 +352,11 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		Limits  rt.Limits     `json:"limits"`
 		Finite  bool          `json:"finite_floats,omitempty"`
 		File    string        `json:"file,omitempty"`
+		Files   []string      `json:"files,omitempty"`
 	}{1, map[bool]string{true: "command", false: "reactor"}[opts.Command], meta, hostFuncs, opts.NoWASI, c.fuelTable(),
 		rt.Limits{MemoryPages: int(m.MaxPages), CallDepth: r.Cfg.MaxCallDepth,
 			InputBytes: int(opts.MaxInputBytes), ResultBytes: int(opts.MaxResultBytes)}, opts.FiniteFloats,
-		map[bool]string{false: filename}[opts.NoBacktrace]})
+		map[bool]string{false: filename}[opts.NoBacktrace], c.metaFiles()})
 	m.Customs = append(m.Customs, Custom{Name: MetaSection, Payload: payload})
 	if opts.Profile || opts.Debug {
 		m.Customs = append(m.Customs, Custom{Name: DebugSection, Payload: c.debugSection(filename)})
@@ -414,8 +431,6 @@ func (c *compiler) preludeGlobal(name string) Expr {
 func (c *compiler) checkSupported(file *syntax.File) {
 	syntax.Walk(file, func(n syntax.Node) bool {
 		switch n := n.(type) {
-		case *syntax.LoadStmt:
-			c.errorf(n.Load, "load statements are not supported")
 		case *syntax.Literal:
 			switch n.Token {
 			case syntax.BYTES:

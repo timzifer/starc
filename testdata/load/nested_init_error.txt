@@ -1,0 +1,12 @@
+An error in a module that a loaded module loads appears at the load
+statement of the program.
+-- main.star --
+print("main")
+load("a.star", "x")
+-- a.star --
+print("a")
+load("b.star", "y")
+x = y
+-- b.star --
+print("b")
+y = [1][3]

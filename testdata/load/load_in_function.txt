@@ -1,0 +1,6 @@
+Compile error.
+-- main.star --
+def f():
+    load("a.star", "x")
+-- a.star --
+x = 1

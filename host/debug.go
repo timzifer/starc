@@ -86,7 +86,7 @@ func (s *Stop) Stack(ctx context.Context) ([]DebugFrame, error) {
 			if err != nil {
 				return nil, err
 			}
-			fr.Pos = Position{Filename: s.dbg.File, Line: int(uint32(res)), Col: int(uint32(res >> 32))}
+			fr.Pos = decodePos(s.dbg.Files, s.dbg.File, res)
 		}
 		nl, err := s.call32(ctx, "starc_dbg_locals", i)
 		if err != nil {
@@ -206,7 +206,7 @@ func stopFunc(d *Debugger, info *DebugInfo) api.GoModuleFunc {
 		s := &Stop{mod: mod, dbg: info}
 		if id := int(api.DecodeU32(stack[0])); id < len(info.Positions) {
 			p := info.Positions[id]
-			s.Pos = Position{Filename: info.File, Line: p[0], Col: p[1]}
+			s.Pos = Position{Filename: fileName(info.Files, info.File, p[2]), Line: p[0], Col: p[1]}
 		}
 		d.Stop(ctx, s)
 	}

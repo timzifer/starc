@@ -1,0 +1,6 @@
+Compile error.
+-- main.star --
+load("a.star", "x")
+-- a.star --
+load("a.star", "z")
+x = 1

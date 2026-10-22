@@ -71,12 +71,13 @@ source:
 {
   "version": 1,
   "file": "bot.star",
+  "files": ["bot.star"],
   "functions": [
     {"name": "<toplevel>", "kind": "toplevel"},
     {"name": "sorted", "kind": "builtin"},
     {"name": "fib", "kind": "function", "line": 1, "col": 1, "wasm": "main.fib"}
   ],
-  "positions": [[0, 0], [3, 14], [4, 9]],
+  "positions": [[0, 0, 0], [3, 14, 0], [4, 9, 0]],
   "statements": [2]
 }
 ```
@@ -84,9 +85,10 @@ source:
 `functions` lists the entries of the profile in the order of their
 indices. For a function of the program, `line` and `col` locate its
 `def` and `wasm` names the WebAssembly function that implements it in
-the name section. `positions` maps the position ids that the module
-records before each operation that can fail (see
-[backtraces](abi.md#backtraces)) to `[line, col]`; id 0 is unknown.
+the name section, and `file` (if not 0) indexes `files`, the source
+files of a program that loads modules. `positions` maps the position ids
+that the module records before each operation that can fail (see
+[backtraces](abi.md#backtraces)) to `[line, col, file]`; id 0 is unknown.
 `statements` lists the position ids of the statements at which a debug
 build can stop; it is omitted otherwise.
 `host.Module.DebugInfo` returns the section.
@@ -147,9 +149,10 @@ stop at fib.star:7:9
 ...
 ```
 
-The debugger stops at the statements that start on one of `Lines`, or
-at every statement with `Step`; `Stop.SetStep` switches between the two
-during a stop. A statement is a line of a function body or of the top
+The debugger stops at the statements that start on one of `Lines` (of
+the main file), or at every statement with `Step`, also in loaded
+modules; `Stop.SetStep` switches between the two during a stop. A
+statement is a line of a function body or of the top
 level, including the `return` that forms the body of a `lambda`; a `for`
 statement stops once, its body once per iteration. Built-ins, including
 those implemented in the prelude, have no statements of their own but
@@ -163,8 +166,8 @@ Variables that closures share are read through their cells. The locals
 of a frame are those at the start of its current statement: a caller
 shows its variables before the statement that made the call, and a
 comprehension variable is unbound until the statement after the
-comprehension. `Globals` returns the global variables. Values are
-formatted with `repr`; one that cannot be formatted, such as a value
+comprehension. `Globals` returns the global variables of the main file.
+Values are formatted with `repr`; one that cannot be formatted, such as a value
 nested beyond the call depth limit, reads as `<error: message>` without
 affecting the program.
 

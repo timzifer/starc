@@ -111,6 +111,12 @@ type Options struct {
 	// build uses the same fuel and gives the same results as a release
 	// build, but is larger and slower.
 	Debug bool
+	// Loader provides the source of the modules that load statements name
+	// (see docs/language.md). The name is passed as written in the
+	// statement and serves as the module's file name in positions. All
+	// modules are compiled into one WebAssembly module; without a Loader,
+	// load statements are errors. The compiler never reads files itself.
+	Loader func(module string) ([]byte, error)
 }
 
 // maxCallDepth bounds Options.MaxCallDepth; no engine supports deeper
@@ -207,6 +213,7 @@ func Compile(filename string, src []byte, opts *Options) ([]byte, error) {
 		NoBacktrace:    opts.NoBacktrace,
 		Profile:        opts.Profile,
 		Debug:          opts.Debug,
+		Loader:         opts.Loader,
 		Dialect: syntax.FileOptions{
 			While:           opts.Dialect.While,
 			TopLevelControl: opts.Dialect.TopLevelControl,

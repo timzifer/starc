@@ -53,7 +53,7 @@ rejects such a module if it imports anything from WASI.
 | `starc_error_code` | `() -> i32` | cause of the last error (see [Errors](#errors)), or 0 |
 | `starc_frames` | `() -> i32` | number of frames of the last error (see [Backtraces](#backtraces)) |
 | `starc_frame` | `(i: i32) -> i64` | name of frame `i` of the last error, as a packed pointer/length pair |
-| `starc_frame_pos` | `(i: i32) -> i64` | position of frame `i`: line in the low, column in the high 32 bits; -1 for a built-in |
+| `starc_frame_pos` | `(i: i32) -> i64` | position of frame `i`: line in the low 32 bits, then the column (20 bits) and the file index; -1 for a built-in |
 | `starc_fuel_set` | `(n: i64) -> ()` | sets the remaining fuel budget (only with fuel metering, see [fuel.md](fuel.md)) |
 | `starc_fuel` | `() -> i64` | returns the remaining fuel budget (only with fuel metering) |
 | `starc_profile`, … | | the fuel profile (only with `Options.Profile`, see [debug.md](debug.md)) |
@@ -130,9 +130,10 @@ outermost first, and `starc_frame(i)` and `starc_frame_pos(i)` describe
 frame `i`. The outermost frame of an error in top-level code is
 `<toplevel>`; that of an exported call is the called function. A frame
 with position -1 is a built-in, such as `sorted` or a host function; the
-file of all other positions is `file` in [`starc.meta`](#metadata). A
-line of 0 means that the position is not known. The
-frames stay valid until the next call of `starc_alloc` or of an exported
+file of all other positions is `file` in [`starc.meta`](#metadata), or in
+a program that loads modules the entry of `files` that the file index
+selects. A line of 0 means that the position is not known. The frames
+stay valid until the next call of `starc_alloc` or of an exported
 function. An error in decoding the arguments or encoding the result has
 no frames.
 
@@ -264,7 +265,8 @@ there are none; `no_wasi` is omitted for modules that may import WASI.
 ([fuel.md](fuel.md)) and is omitted otherwise. `limits` lists the
 [limits](#limits); the size limits are omitted when unlimited. `file` is
 the name of the source file in [backtraces](#backtraces) and is omitted
-for a module built without them.
+for a module built without them. A program that loads modules also has
+`files`, the source files by index, the main file first.
 
 Modules built with a profile or for debugging also contain the section
 `starc.debug`,
