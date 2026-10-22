@@ -176,8 +176,8 @@ def _str_rindex(self, sub, start = None, end = None):
         _error("rindex: substring not found")
     return i
 
-def _str_lstrip(self, chars = None):
-    if chars == None:
+def _str_lstrip(self, chars = ""):
+    if chars == "":
         chars = _WS
     i = 0
     n = len(self)
@@ -185,15 +185,15 @@ def _str_lstrip(self, chars = None):
         i += 1
     return self[i:]
 
-def _str_rstrip(self, chars = None):
-    if chars == None:
+def _str_rstrip(self, chars = ""):
+    if chars == "":
         chars = _WS
     j = len(self)
     while j > 0 and self[j - 1] in chars:
         j -= 1
     return self[:j]
 
-def _str_strip(self, chars = None):
+def _str_strip(self, chars = ""):
     return self.lstrip(chars).rstrip(chars)
 
 def _str_removeprefix(self, prefix):

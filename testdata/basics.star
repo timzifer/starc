@@ -118,3 +118,13 @@ def outer():
     return mid()
 
 print(outer())
+---
+# An empty cutset strips whitespace, as in go.starlark.net.
+print(repr(" a\n".rstrip("")), repr(" a ".strip("")), repr(" a ".lstrip("")), repr("\t\v\f\r x".strip("")))
+print(repr("xx".strip("")), repr("".strip("")), repr("a ".rstrip("a")))
+---
+" a ".strip(0)
+---
+" a ".lstrip(None)
+---
+" a ".strip(None)
