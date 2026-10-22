@@ -28,6 +28,7 @@ func (c *compiler) profileExports() {
 type debugFunction struct {
 	Name string `json:"name"`
 	Kind string `json:"kind"`
+	File int    `json:"file,omitempty"` // index into the section's files
 	Line int    `json:"line,omitempty"`
 	Col  int    `json:"col,omitempty"`
 	Wasm string `json:"wasm,omitempty"`
@@ -41,14 +42,20 @@ func (c *compiler) debugSection(filename string) []byte {
 	type section struct {
 		Version    int             `json:"version"`
 		File       string          `json:"file"`
+		Files      []string        `json:"files"`
 		Functions  []debugFunction `json:"functions"`
-		Positions  [][2]int        `json:"positions"`
+		Positions  [][3]int        `json:"positions"`
 		Statements []uint32        `json:"statements,omitempty"`
 	}
-	s := section{Version: 1, File: filename, Functions: []debugFunction{}, Positions: [][2]int{{0, 0}}}
+	s := section{Version: 1, File: filename, Functions: []debugFunction{}, Positions: [][3]int{{0, 0, 0}}}
 	for _, e := range c.r.ProfileEntries() {
-		s.Functions = append(s.Functions, debugFunction{e.Name, string(e.Kind), e.Line, e.Col, e.Wasm})
+		file := 0
+		if e.File != "" {
+			file = c.r.FileIndex(e.File)
+		}
+		s.Functions = append(s.Functions, debugFunction{e.Name, string(e.Kind), file, e.Line, e.Col, e.Wasm})
 	}
+	s.Files = c.r.Files()
 	s.Positions = append(s.Positions, c.r.Positions()...)
 	s.Statements = c.r.DebugStatements()
 	b, _ := json.Marshal(s)

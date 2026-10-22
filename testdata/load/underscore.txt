@@ -1,0 +1,5 @@
+Compile error.
+-- main.star --
+load("a.star", "_x")
+-- a.star --
+_x = 1

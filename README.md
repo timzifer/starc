@@ -76,6 +76,16 @@ wasm, err  = starc.CompileFile("prog.star", &starc.Options{
 
 Compile errors are returned as a `starc.ErrorList` with source positions.
 
+Programs can `load` other modules, which the embedder provides; they are
+compiled into the same WebAssembly module (the command line loads files
+next to the input file):
+
+```go
+wasm, err := starc.Compile("bot.star", src, &starc.Options{
+	Loader: func(module string) ([]byte, error) { return library.Source(module) },
+})
+```
+
 To run modules from Go, use the `host` package (based on wazero):
 
 ```go

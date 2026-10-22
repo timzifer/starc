@@ -16,11 +16,13 @@ import (
 type DebugInfo struct {
 	Version int    `json:"version"`
 	File    string `json:"file"`
+	// Files are the source files by index, the main file first.
+	Files []string `json:"files"`
 	// Functions are the entries of the profile, in order.
 	Functions []DebugFunction `json:"functions"`
-	// Positions are the source positions (line, col) by position id;
-	// entry 0 is unknown.
-	Positions [][2]int `json:"positions"`
+	// Positions are the source positions (line, col, file index) by
+	// position id; entry 0 is unknown.
+	Positions [][3]int `json:"positions"`
 	// Statements are the position ids of the statements of a debug
 	// build, where it can stop.
 	Statements []uint32 `json:"statements,omitempty"`
@@ -32,7 +34,9 @@ type DebugFunction struct {
 	// Kind is "toplevel", "function" (of the program), "builtin" or
 	// "host".
 	Kind string `json:"kind"`
-	// Line and Col locate the def of a function of the program.
+	// File (an index into Files), Line and Col locate the def of a
+	// function of the program.
+	File int `json:"file,omitempty"`
 	Line int `json:"line,omitempty"`
 	Col  int `json:"col,omitempty"`
 	// Wasm names the WebAssembly function that implements a function of
@@ -87,7 +91,7 @@ func (m *Module) Profile(ctx context.Context) ([]ProfileEntry, error) {
 	for i, f := range m.debug.Functions {
 		e := ProfileEntry{Name: f.Name, Kind: f.Kind}
 		if f.Line != 0 {
-			e.Pos = Position{Filename: m.debug.File, Line: f.Line, Col: f.Col}
+			e.Pos = Position{Filename: fileName(m.debug.Files, m.debug.File, f.File), Line: f.Line, Col: f.Col}
 		}
 		res, err := m.profFuel.Call(ctx, uint64(i))
 		if err != nil {
@@ -116,4 +120,23 @@ func (m *Module) initProfile(mod api.Module) {
 	m.profFuel = mod.ExportedFunction("starc_profile_fuel")
 	m.profCalls = mod.ExportedFunction("starc_profile_calls")
 	m.profReset = mod.ExportedFunction("starc_profile_reset")
+}
+
+// colBits is the number of bits of the column in a packed position; the
+// index of the source file (in Meta.Files or DebugInfo.Files) is above.
+const colBits = 20
+
+// decodePos decodes a packed position: the line in the low 32 bits, then
+// the column and the index of the file.
+func decodePos(files []string, main string, v uint64) Position {
+	hi := uint32(v >> 32)
+	return Position{Filename: fileName(files, main, int(hi>>colBits)), Line: int(uint32(v)), Col: int(hi & (1<<colBits - 1))}
+}
+
+// fileName returns file i of files, or main if there is no such file.
+func fileName(files []string, main string, i int) string {
+	if i < len(files) {
+		return files[i]
+	}
+	return main
 }

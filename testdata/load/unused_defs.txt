@@ -1,0 +1,14 @@
+Unused functions of a loaded module are not compiled, unless running
+their def has an effect: a default value is evaluated when the def runs.
+-- main.star --
+load("lib.star", "used")
+print(used())
+-- lib.star --
+def used():
+    return helper() + 1
+def helper():
+    return 41
+def unused_plain(x, y = 2, z = None):
+    return x + y
+def unused_effect(x = print("default evaluated")):
+    return x

@@ -1,0 +1,34 @@
+Loads with renaming, a diamond (util is initialized once), functions and
+closures across modules, and globals of a module used by its functions.
+-- main.star --
+print("main start")
+load("geo.star", "area", "Shape", unit = "UNIT")
+load("util.star", "twice", "COUNTER")
+load("geo.star", area2 = "area")
+print(area(3), area2(2), unit, twice(4), COUNTER)
+s = Shape(2, 5)
+print(s.size(), area == area2, type(area))
+def total(xs):
+    return sum_all([area(x) for x in xs])
+load("util.star", "sum_all")
+print(total([1, 2, 3]))
+-- geo.star --
+load("util.star", "twice")
+print("geo init")
+UNIT = "cm2"
+def area(r):
+    return twice(r) * r
+def Shape(w, h):
+    def size():
+        return "%d%s" % (w * h, UNIT)
+    return struct(size = size)
+-- util.star --
+print("util init")
+COUNTER = [1, 2]
+def twice(x):
+    return 2 * x
+def sum_all(xs):
+    t = 0
+    for x in xs:
+        t += x
+    return t

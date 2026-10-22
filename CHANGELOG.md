@@ -8,6 +8,14 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+* `load` statements: `Options.Loader` provides the source of the modules
+  they name; all modules are compiled into one WebAssembly module,
+  each initialized once and frozen, and unused functions of loaded
+  modules are dropped. Cycles, missing modules and missing names are
+  compile-time errors. Positions in backtraces, profiles and debug
+  information name their file (`files` in `starc.meta` and
+  `starc.debug`). `starc` loads files relative to the input file or
+  `-load-dir`. See docs/language.md.
 * Debug builds: `Options.Debug` (`-debug`) compiles hooks at the
   statements of the program. `host.Config.Debug` stops at breakpoint
   lines or at every statement and calls `Debugger.Stop`, where

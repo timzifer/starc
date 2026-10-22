@@ -1,0 +1,15 @@
+An error in a function of a loaded module shows frames in both files.
+-- main.star --
+load("lib.star", "check")
+def run(n):
+    return check(n) + 1
+print(run(1))
+print(run(-1))
+-- lib.star --
+def check(n):
+    if n < 0:
+        fail("negative: %d" % n)
+    return helper(n)
+
+def helper(n):
+    return n * 10

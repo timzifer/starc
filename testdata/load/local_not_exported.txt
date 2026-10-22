@@ -1,0 +1,8 @@
+Compile error: Names that a module loads are local to it, not exported.
+-- main.star --
+load("b.star", "x")
+-- a.star --
+x = 1
+-- b.star --
+load("a.star", "x")
+y = x

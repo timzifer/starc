@@ -105,6 +105,7 @@ type buildOpts struct {
 	profile bool
 	debug   bool
 	breaks  string
+	loadDir string
 	budget  int64
 	limits  struct {
 		pages, input, result uint
@@ -134,6 +135,7 @@ func buildFlags(stderr io.Writer) (*flag.FlagSet, *buildOpts) {
 	fs.BoolVar(&o.noBT, "no-backtrace", false, "omit source positions and call stacks of run-time errors")
 	fs.BoolVar(&o.profile, "profile", false, "record the fuel used by each function (implies -fuel; run: print the profile)")
 	fs.BoolVar(&o.debug, "debug", false, "compile statement hooks for a debugger (see docs/debug.md)")
+	fs.StringVar(&o.loadDir, "load-dir", "", "directory of the files that load statements name (default: that of the input file)")
 	fs.StringVar(&o.breaks, "break", "", "run: comma-separated lines at which to print the call stack and variables (implies -debug)")
 	fs.BoolVar(&o.dialect.While, "while", false, "allow while loops")
 	fs.BoolVar(&o.dialect.TopLevelControl, "toplevel-control", false, "allow if/for/while at top level")
@@ -173,8 +175,24 @@ func splitList(s string) []string {
 	return out
 }
 
-// compileInput compiles the named input ("-" for stdin).
-func compileInput(name string, stdin io.Reader, opts *starc.Options) ([]byte, error) {
+// compileInput compiles the file name ("-" for stdin). Its load statements
+// load files relative to loadDir, by default the directory of the file.
+func compileInput(name string, stdin io.Reader, opts *starc.Options, loadDir string) ([]byte, error) {
+	if loadDir == "" {
+		loadDir = "."
+		if name != "-" {
+			loadDir = filepath.Dir(name)
+		}
+	}
+	root, err := os.OpenRoot(loadDir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	// The root keeps modules inside loadDir, also through symbolic links.
+	opts.Loader = func(module string) ([]byte, error) {
+		return root.ReadFile(filepath.FromSlash(module))
+	}
 	if name == "-" {
 		return starc.CompileReader("<stdin>", stdin, opts)
 	}
@@ -214,7 +232,7 @@ func build(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 	in := fs.Arg(0)
-	wasm, err := compileInput(in, stdin, o.options())
+	wasm, err := compileInput(in, stdin, o.options(), o.loadDir)
 	if err != nil {
 		return report(stderr, err)
 	}
@@ -260,7 +278,7 @@ func runCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			// (unless the profile is to be read after it).
 			opts.ExecModel = starc.Command
 		}
-		wasm, err = compileInput(in, stdin, opts)
+		wasm, err = compileInput(in, stdin, opts, o.loadDir)
 	}
 	if err != nil {
 		return report(stderr, err)

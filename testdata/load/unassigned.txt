@@ -1,0 +1,7 @@
+A global that the module declares but never assigns is not exported.
+-- main.star --
+load("a.star", "x")
+print(x)
+-- a.star --
+if False:
+    x = 1

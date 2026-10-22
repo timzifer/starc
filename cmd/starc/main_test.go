@@ -144,3 +144,18 @@ func TestBreak(t *testing.T) {
 		t.Errorf("invalid line: code %d", code)
 	}
 }
+
+func TestLoad(t *testing.T) {
+	code, stdout, stderr := cli(t, "", "run", "../../examples/report.star", "summary", "[3, 5, 10]")
+	if code != 0 || stdout != `{"mean":6,"n":3}`+"\n" {
+		t.Fatalf("code %d stdout %q stderr %q", code, stdout, stderr)
+	}
+	// Modules cannot leave the load directory.
+	if code, _, stderr := cli(t, `load("../go.mod", "x")`, "run", "-load-dir", "../../examples", "-"); code != 1 ||
+		!strings.Contains(stderr, "<stdin>:1:1: cannot load ../go.mod") {
+		t.Errorf("escape: code %d stderr %q", code, stderr)
+	}
+	if code, _, stderr := cli(t, `load("lib/stats.star", "mean")`+"\nprint(mean([1, 2]))\n", "run", "-load-dir", "../../examples", "-"); code != 0 {
+		t.Errorf("stdin: code %d stderr %q", code, stderr)
+	}
+}

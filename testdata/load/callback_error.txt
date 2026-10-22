@@ -1,0 +1,8 @@
+A function of a loaded module called by a built-in fails.
+-- main.star --
+load("keys.star", "by_len")
+print(sorted(["ccc", "a", "bb"], key = by_len))
+print(sorted(["x", None], key = by_len))
+-- keys.star --
+def by_len(s):
+    return len(s)
