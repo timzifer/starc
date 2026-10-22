@@ -109,6 +109,9 @@ and the project follows [Semantic Versioning](https://semver.org/).
   as in go.starlark.net.
 * `d |= x` updates the dict `d` in place, so other references to it see
   the change, as in go.starlark.net.
+* `strip("")`, `lstrip("")` and `rstrip("")` strip whitespace like the
+  methods without argument, and `None` as the argument is an error, as
+  in go.starlark.net.
 
 ## [0.1.1] - 2026-10-20
 
