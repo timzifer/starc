@@ -99,7 +99,8 @@ const (
 	offSpecFlags  = 12
 	offSpecNames  = 16
 	offSpecActive = 20
-	sizeSpec      = 24
+	offSpecShow   = 24 // name in backtraces of a prelude function, 0 if hidden
+	sizeSpec      = 32
 )
 
 // flagRepr marks a list or dict whose repr is in progress, to detect cycles.
@@ -110,6 +111,7 @@ const (
 	SpecVarargs   = 1
 	SpecKwargs    = 2
 	SpecRecursive = 4 // recursion permitted
+	SpecPrelude   = 8 // defined by the prelude: a built-in in backtraces
 )
 
 // CallType is the signature of every Starlark-callable function:
@@ -154,6 +156,11 @@ type Config struct {
 	// MaxInputBytes and MaxResultBytes limit the encoded arguments and
 	// result of an exported call; 0 means no limit.
 	MaxInputBytes, MaxResultBytes uint32
+	// Backtrace records source positions and a shadow call stack for
+	// the backtraces of errors (see backtrace.go).
+	Backtrace bool
+	// Filename is the name of the source file in backtraces.
+	Filename string
 }
 
 // RT is the runtime library for one module.
@@ -175,6 +182,18 @@ type RT struct {
 	Fuel     *Global // remaining fuel (i64), with Config.Fuel
 	ErrCode  *Global // code of the last error (ErrStarlark, ErrFuel, ...)
 	Depth    *Global // current call depth
+
+	// Backtraces (see backtrace.go).
+	CurPos     *Global // position id of the current operation
+	SP         *Global // top of the shadow stack
+	StackBase  *Global // bottom of the shadow stack
+	StackLimit *Global // end of the shadow stack
+	ErrFrames  *Global // number of frames of the last error
+	DupKw      *Global // keyword passed twice to the pending call, or 0
+	posIDs     map[[2]int]uint32
+	posList    [][2]int
+	posTab     uint32 // static table of (line, col) by position id
+	digits     uint32 // static string for writing numbers
 
 	None, False, True uint32
 
@@ -253,6 +272,7 @@ func New(m *Module, cfg Config) *RT {
 	}
 	r.initFuel()
 	r.initLimits()
+	r.initBacktrace()
 	r.registerCore()
 	r.registerNum()
 	r.registerStr()
@@ -314,6 +334,8 @@ func (r *RT) Finish() *Func {
 		)
 	}
 	f.Add(r.methodInit...)
+	f.Add(r.initFrames())
+	r.layoutPositions()
 	end := (r.M.DataEnd() + 7) &^ 7
 	r.Heap.Init = int64(end)
 	r.HeapMark.Init = int64(end)
@@ -406,6 +428,10 @@ func (r *RT) Spec(name string, params []string, nkwonly int, flags int) uint32 {
 	r.M.PutU32(s+offSpecNames, names)
 	return s
 }
+
+// SpecShow sets the name under which a prelude function appears in
+// backtraces; without it, the function is hidden.
+func (r *RT) SpecShow(spec uint32, name string) { r.M.PutU32(spec+offSpecShow, r.Str(name)) }
 
 // ---- method table ----
 
@@ -547,34 +573,22 @@ func (r *RT) bool(cond Expr) Expr { return Select(r.TrueV(), r.FalseV(), cond) }
 // ---- core functions ----
 
 func (r *RT) registerCore() {
-	// alloc(n) -> zeroed, 8-aligned memory
 	// alloc(n) -> zeroed, 8-aligned memory. Memory above the high-water
 	// mark HeapMax has never been used and is zero; arena_reset clears
 	// the reused region in bulk, so alloc itself never clears memory.
-	r.define("alloc", p1, r1, func(f *Func) {
-		n := f.Param(0)
-		p, end, need, pages := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
-		f.Add(
-			r.chargeBytes(get(n)),
-			Set(p, GGet(r.Heap)),
-			Set(end, add(get(p), and(add(get(n), c32(7)), c32(-8)))),
-			If(I32LtU(get(end), get(p)), r.Call("out_of_memory")),
-			If(I32GtU(get(end), I32Shl(MemorySize(), c32(16))), Seq{
-				// Grow geometrically, by at least 4 MiB, to keep the number
-				// of (expensive) grow operations small.
-				Set(need, I32ShrU(add(sub(get(end), I32Shl(MemorySize(), c32(16))), c32(0xffff)), c32(16))),
-				Set(pages, MemorySize()),
-				If(I32LtU(get(pages), c32(64)), Set(pages, c32(64))),
-				If(I32GtU(get(pages), c32(4096)), Set(pages, c32(4096))),
-				If(I32LtU(get(pages), get(need)), Set(pages, get(need))),
-				If(eq(MemoryGrow(get(pages)), c32(-1)),
-					If(eq(MemoryGrow(get(need)), c32(-1)), r.Call("out_of_memory"))),
-			}),
-			GSet(r.Heap, get(end)),
-			If(I32GtU(get(end), GGet(r.HeapMax)), GSet(r.HeapMax, get(end))),
-			get(p),
-		)
-	})
+	// alloc_free is alloc without charging fuel, for the runtime's own
+	// data structures.
+	alloc := func(charge bool) func(f *Func) {
+		return func(f *Func) {
+			n := f.Param(0)
+			if charge {
+				f.Add(r.chargeBytes(get(n)))
+			}
+			r.allocBody(f, n)
+		}
+	}
+	r.define("alloc", p1, r1, alloc(true))
+	r.define("alloc_free", p1, r1, alloc(false))
 
 	// arena_reset(): discards everything allocated since HeapMark.
 	r.define("arena_reset", p0, r0, func(f *Func) {
@@ -588,15 +602,22 @@ func (r *RT) registerCore() {
 	// fail(msg string): records the error and traps.
 	r.define("fail", p1, r0, func(f *Func) {
 		msg := f.Param(0)
+		f.Add(GSet(r.ErrObj, get(msg)))
+		if r.Cfg.Backtrace {
+			f.Add(r.Call("bt_collect"), GSet(r.DupKw, c32(0)))
+		}
 		f.Add(
-			GSet(r.ErrObj, get(msg)),
 			GSet(r.CmpDepth, c32(0)),
 			GSet(r.Depth, c32(0)),
 			If(eqz(GGet(r.ErrCode)), GSet(r.ErrCode, c32(ErrStarlark))),
 		)
 		if r.Cfg.Command {
+			if r.Cfg.Backtrace {
+				f.Add(r.Call("write_backtrace", c32(2)))
+			} else {
+				f.Add(Drop(r.Call("write", c32(2), r.S("Error: "))))
+			}
 			f.Add(
-				Drop(r.Call("write", c32(2), r.S("Error: "))),
 				Drop(r.Call("write", c32(2), get(msg))),
 				Drop(r.Call("write", c32(2), r.S("\n"))),
 				// The exit status is the error code.
@@ -734,3 +755,27 @@ func (r *RT) Slot(slots Expr, i int) Expr { return ld(slots, uint32(4*i)) }
 
 // Leave clears the recursion guard of a function spec.
 func (r *RT) Leave(spec uint32) Expr { return st(addr(spec), offSpecActive, c32(0)) }
+
+// allocBody adds the code of alloc(n) to f.
+func (r *RT) allocBody(f *Func, n Local) {
+	p, end, need, pages := f.Local(I32), f.Local(I32), f.Local(I32), f.Local(I32)
+	f.Add(
+		Set(p, GGet(r.Heap)),
+		Set(end, add(get(p), and(add(get(n), c32(7)), c32(-8)))),
+		If(I32LtU(get(end), get(p)), r.Call("out_of_memory")),
+		If(I32GtU(get(end), I32Shl(MemorySize(), c32(16))), Seq{
+			// Grow geometrically, by at least 4 MiB, to keep the number
+			// of (expensive) grow operations small.
+			Set(need, I32ShrU(add(sub(get(end), I32Shl(MemorySize(), c32(16))), c32(0xffff)), c32(16))),
+			Set(pages, MemorySize()),
+			If(I32LtU(get(pages), c32(64)), Set(pages, c32(64))),
+			If(I32GtU(get(pages), c32(4096)), Set(pages, c32(4096))),
+			If(I32LtU(get(pages), get(need)), Set(pages, get(need))),
+			If(eq(MemoryGrow(get(pages)), c32(-1)),
+				If(eq(MemoryGrow(get(need)), c32(-1)), r.Call("out_of_memory"))),
+		}),
+		GSet(r.Heap, get(end)),
+		If(I32GtU(get(end), GGet(r.HeapMax)), GSet(r.HeapMax, get(end))),
+		get(p),
+	)
+}

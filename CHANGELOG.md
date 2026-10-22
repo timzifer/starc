@@ -8,6 +8,14 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+* Backtraces: run-time errors report the position of the failing
+  operation and the call stack, with the positions and frames of
+  go.starlark.net (built-ins such as `sorted` appear as `<builtin>`).
+  `host.Error` gains `Pos`, `CallStack` and `Backtrace()`, which formats
+  them like `EvalError.Backtrace`; the CLI prints it. Reactor modules
+  export `starc_frames`, `starc_frame` and `starc_frame_pos`, and
+  `starc.meta` names the source `file`. `Options.NoBacktrace`
+  (`-no-backtrace`) omits them.
 * The `set` type with `Dialect.Set` (`-set`), as in go.starlark.net:
   `set()`, its methods, the operators `| & - ^` and subset comparisons.
 * Structs as in `starlarkstruct`: attribute access, `getattr`,
@@ -57,6 +65,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+* A command module, and `starc run`, write the backtrace of an error to
+  stderr instead of only `Error: <message>`.
 * A command module that fails exits with its error code as status: 1
   for a Starlark error as before, 2 for exhausted fuel.
   `host.ExitError.Err` carries the cause.

@@ -99,6 +99,10 @@ func TestConformance(t *testing.T) {
 		for _, c := range readChunks(t, file) {
 			t.Run(c.name, func(t *testing.T) {
 				want, werr := interpret(c.name, c.src)
+				if werr != nil && strings.Contains(c.src, "# backtrace differs") {
+					// Both fail, but elsewhere: compare only that they fail.
+					werr = errors.New(werr.Error())
+				}
 				// Fuel metering (with an unlimited budget) must not change
 				// the behavior.
 				for _, fuel := range []bool{false, true} {
@@ -121,7 +125,7 @@ func compareRuns(t *testing.T, label, want string, werr error, got, stderr strin
 		// Only a Starlark error matches: a trap, stack overflow or
 		// deadline is a bug even where the interpreter fails.
 		var exit *sys.ExitError
-		if !errors.As(gerr, &exit) || exit.ExitCode() != 1 || !strings.HasPrefix(stderr, "Error: ") {
+		if !errors.As(gerr, &exit) || exit.ExitCode() != 1 || !isStarlarkError(stderr) {
 			t.Fatalf("%scompiled program did not fail with a Starlark error: %v (interpreter: %v)\nstderr: %s\noutput so far:\n%s",
 				label, gerr, werr, stderr, got)
 		}
@@ -142,6 +146,32 @@ func compareRuns(t *testing.T, label, want string, werr error, got, stderr strin
 	if got != want {
 		t.Errorf("%soutput mismatch at %s\n--- interpreter ---\n%s--- compiled ---\n%s", label, firstDiff(want, got), want, got)
 	}
+	var ee *starlark.EvalError
+	if errors.As(werr, &ee) && gerr != nil {
+		compareBacktraces(t, label, ee.Backtrace(), strings.TrimSuffix(stderr, "\n"))
+	}
+}
+
+// compareBacktraces fails t if the backtrace of a compiled program
+// differs from that of the interpreter: its frames with their positions
+// and the built-in that failed. The messages are not compared.
+func compareBacktraces(t *testing.T, label, want, got string) {
+	t.Helper()
+	// trace drops the message from the last line, "Error[ in f]: msg".
+	trace := func(s string) string {
+		i := strings.LastIndex(s, "\nError") + 1
+		head, _, _ := strings.Cut(s[i:], ": ")
+		return s[:i] + head
+	}
+	if w, g := trace(want), trace(got); w != g {
+		t.Errorf("%sbacktrace mismatch\n--- interpreter ---\n%s\n--- compiled ---\n%s", label, want, got)
+	}
+}
+
+// isStarlarkError reports whether stderr is the report of a Starlark
+// error by a command module: "Error: msg", after a backtrace if any.
+func isStarlarkError(stderr string) bool {
+	return strings.HasPrefix(stderr, "Error") || strings.HasPrefix(stderr, "Traceback (most recent call last):\n")
 }
 
 // firstDiff describes the first line in which want and got differ.

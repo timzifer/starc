@@ -96,6 +96,11 @@ type Options struct {
 	// go.starlark.net usually predeclare it (starlarkstruct.Make). Struct
 	// values from the host are available without it.
 	Struct bool
+	// NoBacktrace omits the source positions and the call stack of
+	// run-time errors (see docs/abi.md), which cost a store before every
+	// operation that can fail and a few instructions per call. Errors
+	// then carry only their message.
+	NoBacktrace bool
 }
 
 // maxCallDepth bounds Options.MaxCallDepth; no engine supports deeper
@@ -150,7 +155,8 @@ func (l ErrorList) Error() string {
 }
 
 // Compile compiles Starlark source code into a WebAssembly module. The
-// filename is used in error messages only.
+// filename appears in error messages and, unless Options.NoBacktrace is
+// set, in the module, for the positions of run-time errors.
 func Compile(filename string, src []byte, opts *Options) ([]byte, error) {
 	if opts == nil {
 		opts = &Options{}
@@ -188,6 +194,7 @@ func Compile(filename string, src []byte, opts *Options) ([]byte, error) {
 		MaxResultBytes: opts.MaxResultBytes,
 		FiniteFloats:   opts.FiniteFloats,
 		Struct:         opts.Struct,
+		NoBacktrace:    opts.NoBacktrace,
 		Dialect: syntax.FileOptions{
 			While:           opts.Dialect.While,
 			TopLevelControl: opts.Dialect.TopLevelControl,

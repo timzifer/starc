@@ -28,6 +28,7 @@ func (r *RT) registerABI() {
 			GSet(r.ErrObj, c32(0)),
 			GSet(r.ErrCode, c32(0)),
 			GSet(r.Depth, c32(0)),
+			r.ResetFrames(),
 			r.Call("arena_reset"),
 			r.checkSize(get(f.Param(0)), r.Cfg.MaxInputBytes, "arguments too large"),
 			r.Call("alloc", get(f.Param(0))),

@@ -50,7 +50,8 @@ func TestErrors(t *testing.T) {
 	if code, _, stderr := cli(t, "x = (", "-o", "-", "-"); code != 1 || !strings.Contains(stderr, "<stdin>:1:6") {
 		t.Errorf("syntax error: code %d stderr %q", code, stderr)
 	}
-	if code, _, stderr := cli(t, "fail('x')", "run", "-"); code != 1 || stderr != "Error: fail: x\n" {
+	if code, _, stderr := cli(t, "fail('x')", "run", "-"); code != 1 ||
+		stderr != "Traceback (most recent call last):\n  <stdin>:1:5: in <toplevel>\nError in fail: fail: x\n" {
 		t.Errorf("runtime error: code %d stderr %q", code, stderr)
 	}
 	if code, _, _ := cli(t, ""); code != 2 {
@@ -103,7 +104,7 @@ func TestFuelFlags(t *testing.T) {
 		t.Errorf("-fuel: code %d stdout %q stderr %q", code, stdout, stderr)
 	}
 	code, _, stderr = cli(t, src, "run", "-budget", "3000", "-", "f", "100")
-	if code != 1 || stderr != "fuel used: 3000\nstarc: fuel exhausted\n" {
+	if want := "fuel used: 3000\nTraceback (most recent call last):\n  <stdin>:2:18: in f\nError in sorted: fuel exhausted\n"; code != 1 || stderr != want {
 		t.Errorf("-budget: code %d stderr %q", code, stderr)
 	}
 	if code, _, _ := cli(t, src, "run", "-budget", "-1", "-", "f", "1"); code != 2 {

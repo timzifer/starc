@@ -55,6 +55,9 @@ type Options struct {
 	// MaxInputBytes and MaxResultBytes limit the encoded arguments and
 	// result of an exported call; 0 means no limit.
 	MaxInputBytes, MaxResultBytes uint32
+	// NoBacktrace omits source positions and the shadow call stack:
+	// errors carry only their message.
+	NoBacktrace bool
 }
 
 // Error is a compilation error at a source position.
@@ -82,6 +85,9 @@ const (
 	ExportErrorCode = "starc_error_code"
 	ExportFuelSet   = "starc_fuel_set"
 	ExportFuel      = "starc_fuel"
+	ExportFrames    = "starc_frames"
+	ExportFrame     = "starc_frame"
+	ExportFramePos  = "starc_frame_pos"
 	MetaSection     = "starc.meta"
 )
 
@@ -142,7 +148,8 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		m.MaxPages = rt.MaxMemoryPages
 	}
 	r := rt.New(m, rt.Config{Command: opts.Command, NoWASI: opts.NoWASI, Fuel: opts.Fuel, FiniteFloats: opts.FiniteFloats,
-		MaxCallDepth: opts.MaxCallDepth, MaxInputBytes: opts.MaxInputBytes, MaxResultBytes: opts.MaxResultBytes})
+		MaxCallDepth: opts.MaxCallDepth, MaxInputBytes: opts.MaxInputBytes, MaxResultBytes: opts.MaxResultBytes,
+		Backtrace: !opts.NoBacktrace, Filename: filename})
 	c.m, c.r = m, r
 
 	preludeUniverse := func(name string) bool {
@@ -260,6 +267,17 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		codeF := m.AddFunc(NewFunc(ExportErrorCode, nil, I32))
 		codeF.Add(r.Call("error_code"))
 		m.Export(ExportErrorCode, codeF)
+		if !opts.NoBacktrace {
+			framesF := m.AddFunc(NewFunc(ExportFrames, nil, I32))
+			framesF.Add(GGet(r.ErrFrames))
+			m.Export(ExportFrames, framesF)
+			frameF := m.AddFunc(NewFunc(ExportFrame, []ValType{I32}, I64))
+			frameF.Add(r.Call("frame_name", Get(frameF.Param(0))))
+			m.Export(ExportFrame, frameF)
+			posF := m.AddFunc(NewFunc(ExportFramePos, []ValType{I32}, I64))
+			posF.Add(r.Call("frame_pos", Get(posF.Param(0))))
+			m.Export(ExportFramePos, posF)
+		}
 		for _, name := range exports {
 			m.Export(name, c.exportWrapper(name))
 			meta = append(meta, c.exportMeta(name))
@@ -291,9 +309,11 @@ func Compile(filename string, src []byte, opts Options) (out []byte, err error) 
 		Fuel    *rt.FuelTable `json:"fuel,omitempty"`
 		Limits  rt.Limits     `json:"limits"`
 		Finite  bool          `json:"finite_floats,omitempty"`
+		File    string        `json:"file,omitempty"`
 	}{1, map[bool]string{true: "command", false: "reactor"}[opts.Command], meta, hostFuncs, opts.NoWASI, c.fuelTable(),
 		rt.Limits{MemoryPages: int(m.MaxPages), CallDepth: r.Cfg.MaxCallDepth,
-			InputBytes: int(opts.MaxInputBytes), ResultBytes: int(opts.MaxResultBytes)}, opts.FiniteFloats})
+			InputBytes: int(opts.MaxInputBytes), ResultBytes: int(opts.MaxResultBytes)}, opts.FiniteFloats,
+		map[bool]string{false: filename}[opts.NoBacktrace]})
 	m.Customs = append(m.Customs, Custom{Name: MetaSection, Payload: payload})
 
 	return m.Encode()
@@ -383,7 +403,7 @@ func (c *compiler) checkSupported(file *syntax.File) {
 
 func (c *compiler) exportList() ([]string, error) {
 	reserved := map[string]bool{"memory": true, "_initialize": true, "_start": true, ExportAlloc: true, ExportError: true,
-		ExportErrorCode: true, ExportFuelSet: true, ExportFuel: true}
+		ExportErrorCode: true, ExportFuelSet: true, ExportFuel: true, ExportFrames: true, ExportFrame: true, ExportFramePos: true}
 	if c.opts.Exports == nil {
 		var names []string
 		for _, stmt := range c.user.file.Stmts {
@@ -456,6 +476,7 @@ func (c *compiler) exportWrapper(name string) *Func {
 		GSet(r.ErrObj, I32c(0)),
 		GSet(r.ErrCode, I32c(0)),
 		GSet(r.Depth, I32c(0)),
+		r.ResetFrames(),
 		Set(fn, GGet(c.user.byName[name])),
 		Set(kw, r.Call("alloc", I32c(4))),
 		Set(args, r.Call("abi_args", Get(ptr), Get(n), Get(kw))),

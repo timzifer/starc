@@ -140,7 +140,7 @@ func TestCommandModule(t *testing.T) {
 	if !errors.As(err, &exit) || exit.Code != 1 {
 		t.Fatalf("err = %v", err)
 	}
-	if out.String() != "hi\n" || errb.String() != "Error: fail: oops\n" {
+	if want := "Traceback (most recent call last):\n  cmd.star:2:5: in <toplevel>\nError in fail: fail: oops\n"; out.String() != "hi\n" || errb.String() != want {
 		t.Errorf("stdout %q stderr %q", out.String(), errb.String())
 	}
 }

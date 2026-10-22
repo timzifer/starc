@@ -76,6 +76,7 @@ print(float("0.1e1"), float("123456789012345678901234567890"), 1e21, 1e-5, 12345
 print(int(x = "12"), int(x = "ff", base = 16), int("10", base = 2), int(-9223372036854775808.0), int(-2.5))
 ---
 # Ranges keep 64-bit lengths; slicing and indexing stay lazy.
+# backtrace differs: go.starlark.net fails at a 32-bit index first.
 r = range(4294967296)
 print(len(r), list(r[:2]), r[-1], r[4294967293], r[4294967290:], len(r[::2]), bool(r))
 print(range(0, 10, 3) == range(0, 12, 3), range(1, 1) == range(5, 2), r == range(4294967296), range(3) == range(1, 3))

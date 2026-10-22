@@ -13,6 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"strings"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -68,6 +70,9 @@ type Meta struct {
 	Limits Limits `json:"limits"`
 	// FiniteFloats reports a module in which NaN and infinities are errors.
 	FiniteFloats bool `json:"finite_floats,omitempty"`
+	// File is the name of the source file, for the positions of errors;
+	// it is omitted for a module built without backtraces.
+	File string `json:"file,omitempty"`
 }
 
 // Limits are the hard limits of a module (see starc.Options).
@@ -101,9 +106,68 @@ const (
 type Error struct {
 	Msg  string
 	Code ErrorCode
+	// Pos is the position of the failing operation: that of the innermost
+	// frame of the program, outside built-ins. It is zero if unknown, as
+	// for a module built without backtraces.
+	Pos Position
+	// CallStack lists the active calls at the time of the error,
+	// outermost first, as go.starlark.net's EvalError.CallStack does.
+	CallStack []Frame
 }
 
 func (e *Error) Error() string { return e.Msg }
+
+// Backtrace returns the call stack and the message in the format of
+// go.starlark.net's EvalError.Backtrace:
+//
+//	Traceback (most recent call last):
+//	  prog.star:5:2: in <toplevel>
+//	  prog.star:2:9: in f
+//	Error in fail: fail: boom
+func (e *Error) Backtrace() string {
+	var b strings.Builder
+	stack, in := e.CallStack, ""
+	if n := len(stack); n > 0 && stack[n-1].Pos.Builtin() {
+		in = " in " + stack[n-1].Name
+		stack = stack[:n-1]
+	}
+	if len(stack) > 0 {
+		b.WriteString("Traceback (most recent call last):\n")
+	}
+	for _, fr := range stack {
+		fmt.Fprintf(&b, "  %s: in %s\n", fr.Pos, fr.Name)
+	}
+	fmt.Fprintf(&b, "Error%s: %s", in, e.Msg)
+	return b.String()
+}
+
+// Frame is a call in the CallStack of an Error.
+type Frame struct {
+	Name string // the function, "<toplevel>", or the name of a built-in
+	Pos  Position
+}
+
+// Position is a source position. Built-ins have the file name
+// "<builtin>" and no line.
+type Position struct {
+	Filename  string
+	Line, Col int
+}
+
+// Builtin reports whether p is the position of a built-in.
+func (p Position) Builtin() bool { return p.Filename == "<builtin>" && p.Line == 0 }
+
+// String formats p as go.starlark.net does: "file:line:col", without
+// the column or line if they are unknown.
+func (p Position) String() string {
+	switch {
+	case p.Line == 0:
+		return p.Filename
+	case p.Col == 0:
+		return fmt.Sprintf("%s:%d", p.Filename, p.Line)
+	}
+	return fmt.Sprintf("%s:%d:%d", p.Filename, p.Line, p.Col)
+}
 
 // Is reports whether target is the sentinel error of e's code, such as
 // ErrFuelExhausted for CodeFuel.
@@ -168,6 +232,9 @@ type Module struct {
 	alloc   api.Function
 	errFn   api.Function
 	codeFn  api.Function
+	frames  api.Function // starc_frames, nil without backtraces
+	frame   api.Function
+	posFn   api.Function
 	fuelSet api.Function
 	fuelGet api.Function
 	exports map[string]api.Function
@@ -293,6 +360,11 @@ func Load(ctx context.Context, wasm []byte, cfg *Config) (*Module, error) {
 	m.alloc = mod.ExportedFunction("starc_alloc")
 	m.errFn = mod.ExportedFunction("starc_error")
 	m.codeFn = mod.ExportedFunction("starc_error_code")
+	// Modules built with NoBacktrace, or before backtraces existed, lack
+	// the frame functions.
+	m.frames = mod.ExportedFunction("starc_frames")
+	m.frame = mod.ExportedFunction("starc_frame")
+	m.posFn = mod.ExportedFunction("starc_frame_pos")
 	for _, ex := range meta.Exports {
 		m.exports[ex.Name] = mod.ExportedFunction(ex.Name)
 	}
@@ -380,6 +452,16 @@ func checkExports(cm wazero.CompiledModule, meta *Meta) error {
 	}
 	if err := check("starc_error", nil, []api.ValueType{i64}); err != nil {
 		return err
+	}
+	if _, ok := defs["starc_frames"]; ok {
+		if err := check("starc_frames", nil, []api.ValueType{i32}); err != nil {
+			return err
+		}
+		for _, name := range []string{"starc_frame", "starc_frame_pos"} {
+			if err := check(name, []api.ValueType{i32}, []api.ValueType{i64}); err != nil {
+				return err
+			}
+		}
 	}
 	for _, ex := range meta.Exports {
 		if err := check(ex.Name, []api.ValueType{i32, i32}, []api.ValueType{i64}); err != nil {
@@ -477,7 +559,41 @@ func (m *Module) starlarkError(ctx context.Context, err error) error {
 			code = ErrorCode(api.DecodeI32(res[0]))
 		}
 	}
-	return &Error{Msg: string(msg), Code: code}
+	e := &Error{Msg: string(msg), Code: code}
+	m.readFrames(ctx, e)
+	return e
+}
+
+// readFrames fills in the call stack and the position of e.
+func (m *Module) readFrames(ctx context.Context, e *Error) {
+	if m.frames == nil {
+		return
+	}
+	res, err := m.frames.Call(ctx)
+	if err != nil {
+		return
+	}
+	n := api.DecodeU32(res[0])
+	for i := uint32(0); i < n; i++ {
+		nr, err := m.frame.Call(ctx, uint64(i))
+		if err != nil {
+			return
+		}
+		name, ok := m.read(nr[0])
+		if !ok {
+			return
+		}
+		pr, err := m.posFn.Call(ctx, uint64(i))
+		if err != nil {
+			return
+		}
+		pos := Position{Filename: "<builtin>"}
+		if pr[0] != math.MaxUint64 {
+			pos = Position{Filename: m.meta.File, Line: int(uint32(pr[0])), Col: int(uint32(pr[0] >> 32))}
+			e.Pos = pos
+		}
+		e.CallStack = append(e.CallStack, Frame{Name: string(name), Pos: pos})
+	}
 }
 
 // Close releases the module (and its runtime, if private).

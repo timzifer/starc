@@ -87,6 +87,20 @@ res, err := m.Call(ctx, "fib", 50)                                  // int64(125
 res, err  = m.CallKw(ctx, "greet", []any{"world"}, abi.NewDict("punct", "?"))
 ```
 
+A run-time error is a `*host.Error` with the position of the failing
+operation and the call stack, as go.starlark.net's `EvalError` reports
+them; `Backtrace()` formats them the same way:
+
+```text
+Traceback (most recent call last):
+  prog.star:7:6: in g
+  prog.star:4:9: in f
+Error in fail: fail: boom 1
+```
+
+`Options.NoBacktrace` (`-no-backtrace`) leaves out the positions and the
+call stack, which cost about 5–8 % of the run time of call-heavy code.
+
 ### Host functions
 
 Embedders can give programs their own functions: declare them when
@@ -150,6 +164,7 @@ By default, a module follows the WASI *reactor* model:
 | `starc_alloc(n) -> ptr` | resets the per-call arena and reserves `n` bytes for arguments |
 | `<name>(ptr, len) -> i64` | calls a top-level function; returns `ptr \| len << 32` of the encoded result |
 | `starc_error() -> i64` | message of the last Starlark error (after a trap) |
+| `starc_frames()`, `starc_frame(i)`, `starc_frame_pos(i)` | call stack of the last error |
 
 Values are exchanged with a compact tag-prefixed binary encoding
 (package [`abi`](https://pkg.go.dev/github.com/timzifer/starc/abi)); a
@@ -159,7 +174,7 @@ including an example for JavaScript hosts.
 
 With `-command` (`ExecModel: starc.Command`) the module is a WASI
 *command*: `_start` runs the program, `print` writes to stdout, and an
-error is written to stderr and exits with status 1.
+error is written to stderr with its backtrace and exits with status 1.
 
 ## How it works
 
