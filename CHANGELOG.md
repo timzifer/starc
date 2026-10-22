@@ -168,9 +168,6 @@ and the project follows [Semantic Versioning](https://semver.org/).
   depth limit, no longer leaves the lists and dicts it was printing
   marked, which made a later `repr` of them in the same module print
   `[...]` or `{...}` as if they contained themselves.
-* `host.Load` rejects a module that exports only some of the profile
-  functions, or exports them with other signatures; before, `Profile`
-  panicked on a module without `starc_profile_calls`.
 
 ## [0.1.1] - 2026-10-20
 
