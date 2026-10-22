@@ -425,6 +425,18 @@ func (r *RT) registerBuiltins() {
 				r.Call("utf8_decode", add(sbytes(get(s)), get(i)), sub(slen(get(s)), get(i))), c32(runeShift)))),
 		)
 	})
+	// _rune_at(s, i) -> code point of the UTF-8 sequence at byte i < len(s),
+	// U+FFFD for an invalid byte
+	r.builtin("_rune_at", func(f *Func, args, kw Local) {
+		s, i := f.Local(I32), f.Local(I32)
+		f.Add(
+			r.checkArgs("_rune_at", args, kw, 2, 2),
+			Set(s, arg(args, 0)),
+			Set(i, I32WrapI64(i64v(arg(args, 1)))),
+			r.Call("int", I64ExtendI32U(and(
+				r.Call("utf8_decode", add(sbytes(get(s)), get(i)), sub(slen(get(s)), get(i))), c32(1<<runeShift-1)))),
+		)
+	})
 	// _rune_count(s) -> number of code points of s, counting each invalid
 	// byte as one (utf8.RuneCountInString)
 	r.builtin("_rune_count", func(f *Func, args, kw Local) {

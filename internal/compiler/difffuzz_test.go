@@ -83,6 +83,7 @@ func FuzzStrings(f *testing.F) {
 		{"hello world", "o"}, {"a,b,,c", ","}, {"  Mixed Case\tline\r\nnext ", " "}, {"", ""},
 		{"0x1F", "x"}, {"-12_3", "1"}, {"1e10", "e"}, {" +inf ", "n"}, {"{}{0}{x!r}{{", "y"},
 		{"Title Case Words", "Case"}, {"aaaa", "aa"}, {"a\nb\r\n\nc", "\n"}, {"%s %d %%", "%"},
+		{"\u00a0x\u3000 y\u2028", "\u00a0"},
 	} {
 		f.Add(s[0], s[1], uint8(i))
 	}

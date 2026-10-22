@@ -4,8 +4,6 @@
 # methods of the given type, other public functions are universal
 # built-ins. Primitive operations are provided by the runtime.
 
-_WS = " \t\n\r\v\f"
-
 def sorted(iterable, *, key = None, reverse = False):
     xs = list(iterable)
     n = len(xs)
@@ -176,21 +174,66 @@ def _str_rindex(self, sub, start = None, end = None):
         _error("rindex: substring not found")
     return i
 
+# Strings are processed by code point (U+FFFD for each invalid byte), and
+# white space is that of unicode.IsSpace, as in go.starlark.net.
+
+def _is_space(c):
+    if c < 0x80:
+        return c == 0x20 or (c >= 0x09 and c <= 0x0d)
+    if c < 0x2000:
+        return c == 0x85 or c == 0xa0 or c == 0x1680
+    return c <= 0x200a or c == 0x2028 or c == 0x2029 or c == 0x202f or c == 0x205f or c == 0x3000
+
+# _cutset returns the code points of chars as dict keys.
+def _cutset(chars):
+    cut = {}
+    i = 0
+    n = len(chars)
+    while i < n:
+        cut[_rune_at(chars, i)] = True
+        i += _utf8_width(chars, i)
+    return cut
+
+# _space_fields returns the (start, end) indices of the fields of s that
+# white space separates.
+def _space_fields(s):
+    res = []
+    start = -1
+    i = 0
+    n = len(s)
+    while i < n:
+        if _is_space(_rune_at(s, i)):
+            if start >= 0:
+                res.append((start, i))
+                start = -1
+        elif start < 0:
+            start = i
+        i += _utf8_width(s, i)
+    if start >= 0:
+        res.append((start, n))
+    return res
+
 def _str_lstrip(self, chars = ""):
-    if chars == "":
-        chars = _WS
+    cut = _cutset(chars)
     i = 0
     n = len(self)
-    while i < n and self[i] in chars:
-        i += 1
+    while i < n:
+        c = _rune_at(self, i)
+        if not (c in cut if cut else _is_space(c)):
+            break
+        i += _utf8_width(self, i)
     return self[i:]
 
 def _str_rstrip(self, chars = ""):
-    if chars == "":
-        chars = _WS
-    j = len(self)
-    while j > 0 and self[j - 1] in chars:
-        j -= 1
+    cut = _cutset(chars)
+    i = 0
+    j = 0
+    n = len(self)
+    while i < n:
+        c = _rune_at(self, i)
+        i += _utf8_width(self, i)
+        if not (c in cut if cut else _is_space(c)):
+            j = i
     return self[:j]
 
 def _str_strip(self, chars = ""):
@@ -210,21 +253,11 @@ def _str_split(self, sep = None, maxsplit = -1):
     res = []
     n = len(self)
     if sep == None:
-        i = 0
-        while i < n:
-            while i < n and self[i] in _WS:
-                i += 1
-            if i >= n:
-                break
-            if maxsplit >= 0 and len(res) == maxsplit:
-                res.append(self[i:])
-                break
-            j = i
-            while j < n and not (self[j] in _WS):
-                j += 1
-            res.append(self[i:j])
-            i = j
-        return res
+        # As splitspace: the last field runs to the end.
+        fields = _space_fields(self)
+        if maxsplit < 0 or len(fields) <= maxsplit:
+            return [self[i:j] for i, j in fields]
+        return [self[i:j] for i, j in fields[:maxsplit]] + [self[fields[maxsplit][0]:]]
     if sep == "":
         _error("split: empty separator")
     i = 0
@@ -242,21 +275,12 @@ def _str_rsplit(self, sep = None, maxsplit = -1):
         return self.split(sep)
     res = []
     if sep == None:
-        j = len(self)
-        while j > 0:
-            while j > 0 and self[j - 1] in _WS:
-                j -= 1
-            if j <= 0:
-                break
-            if len(res) == maxsplit:
-                res.append(self[:j])
-                break
-            i = j
-            while i > 0 and not (self[i - 1] in _WS):
-                i -= 1
-            res.append(self[i:j])
-            j = i
-        return reversed(res)
+        # As rsplitspace: the first field runs to the start.
+        fields = _space_fields(self)
+        k = len(fields) - maxsplit
+        if k <= 0:
+            return [self[i:j] for i, j in fields]
+        return [self[:fields[k - 1][1]]] + [self[i:j] for i, j in fields[k:]]
     if sep == "":
         _error("rsplit: empty separator")
     j = len(self)

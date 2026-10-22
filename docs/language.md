@@ -128,8 +128,10 @@ arithmetic and such values passed in by the host, fails with
   `{}`, `{0}`, `{name}`, `!s` and `!r` without format specifications.
 * `elems()`, `codepoints()`, `elem_ords()` and `codepoint_ords()` return
   lists rather than iterable views.
-* Case conversion and character classification (`upper`, `isalpha`, …)
-  handle ASCII only.
+* Case conversion and character classification (`upper`, `isalpha`,
+  `isspace`, …) handle ASCII only. Splitting and stripping white space
+  (`split()`, `strip()`, …) recognize Unicode white space, as in
+  go.starlark.net.
 * Error messages are similar but not always identical to the reference.
 * Accessing a member that a predeclared host module lacks, such as
   `ctx.nope`, is a compile-time error rather than a run-time error.
