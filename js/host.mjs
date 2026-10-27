@@ -299,6 +299,7 @@ function decodeValue(r, depth) {
     }
     case TAG.opaque: {
       const flags = r.u8();
+      if (flags & ~3) throw new RangeError(`starc: invalid opaque flags ${flags}`);
       const type = decoder.decode(r.raw());
       const repr = decoder.decode(r.raw());
       const payload = r.raw().slice();

@@ -400,6 +400,9 @@ func decodePrefix(b []byte, depth int) (any, []byte, error) {
 		if len(b) < 1 {
 			return nil, nil, ErrTruncated
 		}
+		if b[0]&^(OpaqueFalsy|OpaqueUnhashable) != 0 {
+			return nil, nil, fmt.Errorf("abi: invalid opaque flags %#x", b[0])
+		}
 		o := &Opaque{Falsy: b[0]&OpaqueFalsy != 0, Unhashable: b[0]&OpaqueUnhashable != 0}
 		b = b[1:]
 		var payload string

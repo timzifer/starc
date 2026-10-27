@@ -35,6 +35,7 @@ test("values round-trip", () => {
   assert.throws(() => encode(() => 1), TypeError);
   assert.throws(() => decode(new Uint8Array([3, 1])), /truncated/);
   assert.throws(() => decode(new Uint8Array([0, 0])), /trailing/);
+  assert.throws(() => decode(new Uint8Array([10, 0x30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])), /invalid opaque flags/);
   assert.deepEqual(decodeCall(encodeCall([1, "x"], { k: true })), { args: [1, "x"], kwargs: new Map([["k", true]]) });
   assert.deepEqual(decodeCall(encodeCall([], {})), { args: [], kwargs: null });
 });

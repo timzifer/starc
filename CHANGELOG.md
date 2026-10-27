@@ -126,6 +126,9 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+* `abi.Decode` and `decode` in `js/host.mjs` reject an opaque value with
+  unknown flag bits instead of dropping them, so every value they accept
+  re-encodes to the same bytes.
 * Containers with more than 2^28 elements fail with `out of memory`
   instead of wrapping their size computation, for example when decoding
   a huge encoded list.
