@@ -234,7 +234,7 @@ little-endian. Values need not be aligned.
 | 7 | `tuple` | u32 count, then `count` values |
 | 8 | `dict` | u32 count, then `count` key/value pairs |
 | 9 | `struct` | u32 count, then `count` fields: u32 name length, name bytes, value |
-| 10 | opaque | u8 flags (1: false in a boolean context, 2: unhashable), then the type name, the string form and the payload, each as u32 length and bytes |
+| 10 | opaque | u8 flags (1: false in a boolean context, 2: unhashable; other bits must be 0), then the type name, the string form and the payload, each as u32 length and bytes |
 
 Struct fields are sorted by name when decoded, and names must be
 unique. Only these types can cross the boundary; returning another value
